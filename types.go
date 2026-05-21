@@ -43,7 +43,8 @@ type Config struct {
 // after a successful introspection.
 type TokenInfo struct {
 	// Valid indicates whether the token was accepted by AgentAdmit.
-	Valid bool `json:"valid"`
+	// Maps to the "active" field in the RFC 7662 introspection response.
+	Valid bool `json:"active"`
 
 	// Scopes is the list of scopes granted by the user for this token.
 	Scopes []string `json:"scopes"`
