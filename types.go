@@ -14,7 +14,7 @@
 //	if err != nil {
 //	    // handle error
 //	}
-//	// info.AppID, info.Scopes, info.ExpiresAt
+//	// info.Active, info.AppID, info.Scopes, info.ExpiresAt
 package agentadmit
 
 import "time"
@@ -42,9 +42,10 @@ type Config struct {
 // TokenInfo contains validated token metadata returned by AgentAdmit
 // after a successful introspection.
 type TokenInfo struct {
-	// Valid indicates whether the token was accepted by AgentAdmit.
+	// Active indicates whether the token is currently active — valid signature,
+	// not expired, not revoked, and the connection is still active.
 	// Maps to the "active" field in the RFC 7662 introspection response.
-	Valid bool `json:"active"`
+	Active bool `json:"active"`
 
 	// Scopes is the list of scopes granted by the user for this token.
 	Scopes []string `json:"scopes"`

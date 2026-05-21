@@ -167,7 +167,7 @@ func (c *Client) ValidateContext(ctx context.Context, token string, requiredScop
 			return nil, newError(ErrCodeServiceUnavailable, "failed to decode introspection response", err)
 		}
 
-		if !info.Valid {
+		if !info.Active {
 			return nil, newError(ErrCodeInvalidToken, "token is invalid or revoked", nil)
 		}
 
