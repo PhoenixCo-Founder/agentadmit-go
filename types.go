@@ -37,6 +37,10 @@ type Config struct {
 	// Each retry uses exponential backoff with jitter (start 1s, cap 30s, +0–500ms jitter).
 	// Defaults to 3. Set to 0 to disable retries.
 	MaxRetries int
+
+	// APIURL is the AgentAdmit management API base URL.
+	// Defaults to "https://api.agentadmit.com".
+	APIURL string
 }
 
 // TokenInfo contains validated token metadata returned by AgentAdmit
@@ -79,3 +83,66 @@ type contextKey struct{}
 // tokenContextKey is the singleton key used to store/retrieve TokenInfo
 // from a context.
 var tokenContextKey = contextKey{}
+
+// ---------------------------------------------------------------------------
+// Alerts types
+// ---------------------------------------------------------------------------
+
+// AlertType enumerates the supported alert types.
+type AlertType = string
+
+const (
+	AlertTypeVolumeSpike              AlertType = "volume_spike"
+	AlertTypeFailedScopeAttempts      AlertType = "failed_scope_attempts"
+	AlertTypeBurstPattern             AlertType = "burst_pattern"
+	AlertTypeStaleReactivation        AlertType = "stale_reactivation"
+	AlertTypeNewScopeUsage            AlertType = "new_scope_usage"
+	AlertTypeRevokedConnectionAttempt AlertType = "revoked_connection_attempt"
+)
+
+// ConfigureAlertsRequest is the body for POST /api/v1/alerts.
+type ConfigureAlertsRequest struct {
+	AppID                             string   `json:"app_id"`
+	AlertType                         string   `json:"alert_type"`
+	ConnectionID                      *string  `json:"connection_id,omitempty"`
+	Enabled                           *bool    `json:"enabled,omitempty"`
+	ThresholdValue                    *float64 `json:"threshold_value,omitempty"`
+	ThresholdWindowMinutes            *int     `json:"threshold_window_minutes,omitempty"`
+	ThresholdRatePerMinute            *float64 `json:"threshold_rate_per_minute,omitempty"`
+	StaleDays                         *int     `json:"stale_days,omitempty"`
+	KillSwitchEnabled                 *bool    `json:"kill_switch_enabled,omitempty"`
+	KillSwitchThresholdValue          *float64 `json:"kill_switch_threshold_value,omitempty"`
+	KillSwitchThresholdWindowMinutes  *int     `json:"kill_switch_threshold_window_minutes,omitempty"`
+}
+
+// ConfigureAlertsResponse is returned by POST /api/v1/alerts.
+type ConfigureAlertsResponse struct {
+	OK     bool                   `json:"ok"`
+	Config map[string]interface{} `json:"config"`
+}
+
+// AlertEvent represents a single alert event from GET /api/v1/alerts.
+type AlertEvent struct {
+	ID           string                 `json:"id,omitempty"`
+	AppID        string                 `json:"app_id"`
+	ConnectionID string                 `json:"connection_id,omitempty"`
+	AlertType    string                 `json:"alert_type"`
+	TriggeredAt  string                 `json:"triggered_at"`
+	Details      map[string]interface{} `json:"details,omitempty"`
+}
+
+// ListAlertsResponse is returned by GET /api/v1/alerts.
+type ListAlertsResponse struct {
+	Events []AlertEvent `json:"events"`
+	Total  int          `json:"total"`
+	Limit  int          `json:"limit"`
+	Offset int          `json:"offset"`
+}
+
+// AlertConfigResponse is returned by GET /api/v1/alerts/config.
+type AlertConfigResponse struct {
+	AppID                string                            `json:"app_id"`
+	AppLevel             map[string]interface{}            `json:"app_level"`
+	ConnectionOverrides  map[string]map[string]interface{} `json:"connection_overrides"`
+	AlertTypes           []string                          `json:"alert_types"`
+}

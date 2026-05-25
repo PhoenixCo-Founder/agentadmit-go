@@ -320,3 +320,39 @@ For complete compliance guidance, see our [compliance guide](https://agentadmit.
 ## License
 
 All rights reserved. Patent pending.
+
+## Security Alerts
+
+Monitor suspicious agent activity. Six alert type constants: `AlertTypeVolumeSpike`, `AlertTypeFailedScopeAttempts`, `AlertTypeBurstPattern`, `AlertTypeStaleReactivation`, `AlertTypeNewScopeUsage`, `AlertTypeRevokedConnectionAttempt`.
+
+### Configure Alert Thresholds
+
+```go
+enabled := true
+threshold := 100.0
+windowMin := 5
+
+result, err := client.ConfigureAlerts(agentadmit.ConfigureAlertsRequest{
+    AppID:                  "app_abc123",
+    AlertType:              agentadmit.AlertTypeVolumeSpike,
+    Enabled:                &enabled,
+    ThresholdValue:         &threshold,
+    ThresholdWindowMinutes: &windowMin,
+})
+```
+
+### List Alert Events
+
+```go
+events, err := client.ListAlerts(agentadmit.ListAlertsOptions{
+    AppID:     "app_abc123",
+    AlertType: agentadmit.AlertTypeVolumeSpike,
+    Limit:     50,
+})
+```
+
+### Get Current Config
+
+```go
+config, err := client.GetAlertConfig(agentadmit.GetAlertConfigOptions{AppID: "app_abc123"})
+```

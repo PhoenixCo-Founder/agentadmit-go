@@ -29,6 +29,7 @@ const DefaultMaxRetries = 3
 type Client struct {
 	apiKey     string
 	verifyURL  string
+	apiURLStr  string
 	http       *http.Client
 	maxRetries int
 }
@@ -55,9 +56,15 @@ func New(cfg Config) (*Client, error) {
 		maxRetries = DefaultMaxRetries
 	}
 
+	apiURLStr := cfg.APIURL
+	if apiURLStr == "" {
+		apiURLStr = DefaultAPIURL
+	}
+
 	return &Client{
 		apiKey:     cfg.APIKey,
 		verifyURL:  verifyURL,
+		apiURLStr:  apiURLStr,
 		http:       &http.Client{Timeout: timeout},
 		maxRetries: maxRetries,
 	}, nil
