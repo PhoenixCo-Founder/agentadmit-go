@@ -14,8 +14,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/agentadmit/agentadmit-go"
-	aggin "github.com/agentadmit/agentadmit-go/gin"
+	"github.com/PhoenixCo-Founder/agentadmit-go"
+	aggin "github.com/PhoenixCo-Founder/agentadmit-go/gin"
 	"github.com/gin-gonic/gin"
 )
 

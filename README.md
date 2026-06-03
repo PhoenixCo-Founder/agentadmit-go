@@ -2,16 +2,19 @@
 
 User-mediated AI agent authorization for Go apps. Supports **net/http**, **Gin**, **Echo**, and **MCP servers**.
 
+> **Get started:** Sign up at [agentadmit.com](https://agentadmit.com) → Get your test keys → Install the SDK → Build.
+> Test keys are available immediately after signup. Live keys become available when you subscribe an app.
+
 ## Installation
 
 ```bash
-go get github.com/agentadmit/agentadmit-go
+go get github.com/PhoenixCo-Founder/agentadmit-go
 ```
 
 ## Quickstart
 
 ```go
-import "github.com/agentadmit/agentadmit-go"
+import "github.com/PhoenixCo-Founder/agentadmit-go"
 
 client, _ := agentadmit.New(agentadmit.Config{
     APIKey: os.Getenv("AGENTADMIT_API_KEY"),
@@ -35,7 +38,7 @@ if err != nil {
 ## net/http Middleware
 
 ```go
-import "github.com/agentadmit/agentadmit-go"
+import "github.com/PhoenixCo-Founder/agentadmit-go"
 
 client, _ := agentadmit.New(agentadmit.Config{
     APIKey: os.Getenv("AGENTADMIT_API_KEY"),
@@ -70,8 +73,8 @@ func getWorkouts(w http.ResponseWriter, r *http.Request) {
 
 ```go
 import (
-    "github.com/agentadmit/agentadmit-go"
-    aggin "github.com/agentadmit/agentadmit-go/gin"
+    "github.com/PhoenixCo-Founder/agentadmit-go"
+    aggin "github.com/PhoenixCo-Founder/agentadmit-go/gin"
     "github.com/gin-gonic/gin"
 )
 
@@ -92,13 +95,13 @@ r.Run(":8080")
 
 ```go
 import (
-    "github.com/agentadmit/agentadmit-go"
-    agecho "github.com/agentadmit/agentadmit-go/echo"
+    "github.com/PhoenixCo-Founder/agentadmit-go"
+    agecho "github.com/PhoenixCo-Founder/agentadmit-go/echo"
     "github.com/labstack/echo/v4"
 )
 
 // Note: the subpackage is named agecho to avoid collision with Echo's own package name.
-// Import with alias: agecho "github.com/agentadmit/agentadmit-go/echo"
+// Import with alias: agecho "github.com/PhoenixCo-Founder/agentadmit-go/echo"
 
 client, _ := agentadmit.New(agentadmit.Config{
     APIKey: os.Getenv("AGENTADMIT_API_KEY"),
@@ -117,7 +120,7 @@ MCP servers are the primary target for the Go SDK. Go is one of the most popular
 The pattern: extract the AgentAdmit token from the tool's `arguments`, validate it, execute only if valid.
 
 ```go
-import "github.com/agentadmit/agentadmit-go"
+import "github.com/PhoenixCo-Founder/agentadmit-go"
 
 // Initialize once at server startup
 client, _ := agentadmit.New(agentadmit.Config{

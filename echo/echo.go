@@ -6,8 +6,8 @@
 // Usage:
 //
 //	import (
-//	    "github.com/agentadmit/agentadmit-go"
-//	    agecho "github.com/agentadmit/agentadmit-go/echo"
+//	    "github.com/PhoenixCo-Founder/agentadmit-go"
+//	    agecho "github.com/PhoenixCo-Founder/agentadmit-go/echo"
 //	)
 //
 //	client, _ := agentadmit.New(agentadmit.Config{APIKey: "aa_test_..."})
@@ -21,7 +21,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/agentadmit/agentadmit-go"
+	"github.com/PhoenixCo-Founder/agentadmit-go"
 	"github.com/labstack/echo/v4"
 )
 

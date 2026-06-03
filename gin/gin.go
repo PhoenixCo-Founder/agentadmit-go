@@ -6,8 +6,8 @@
 // Usage:
 //
 //	import (
-//	    "github.com/agentadmit/agentadmit-go"
-//	    aggin "github.com/agentadmit/agentadmit-go/gin"
+//	    "github.com/PhoenixCo-Founder/agentadmit-go"
+//	    aggin "github.com/PhoenixCo-Founder/agentadmit-go/gin"
 //	)
 //
 //	client, _ := agentadmit.New(agentadmit.Config{APIKey: "aa_test_..."})
@@ -20,7 +20,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/agentadmit/agentadmit-go"
+	"github.com/PhoenixCo-Founder/agentadmit-go"
 	"github.com/gin-gonic/gin"
 )
 

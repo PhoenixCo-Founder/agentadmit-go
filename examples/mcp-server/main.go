@@ -27,7 +27,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/agentadmit/agentadmit-go"
+	"github.com/PhoenixCo-Founder/agentadmit-go"
 )
 
 // ---------------------------------------------------------------------------

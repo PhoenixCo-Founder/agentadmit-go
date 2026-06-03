@@ -1,4 +1,4 @@
-module github.com/agentadmit/agentadmit-go
+module github.com/PhoenixCo-Founder/agentadmit-go
 
 go 1.21
 

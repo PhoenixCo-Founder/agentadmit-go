@@ -15,7 +15,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/agentadmit/agentadmit-go"
+	"github.com/PhoenixCo-Founder/agentadmit-go"
 )
 
 func main() {
