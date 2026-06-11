@@ -10,12 +10,13 @@ import (
 	"math/rand"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
 const (
 	// DefaultVerifyURL is the AgentAdmit introspection endpoint.
-	DefaultVerifyURL = "https://api.agentadmit.com/v1/verify"
+	DefaultVerifyURL = "https://api.agentadmit.com/api/v1/verify"
 
 	// DefaultTimeout is the default HTTP timeout for introspection calls.
 	DefaultTimeout = 5 * time.Second
@@ -35,10 +36,15 @@ type Client struct {
 }
 
 // New creates a new AgentAdmit Client with the provided Config.
-// Returns ErrCodeConfig if the API key is empty.
+// Returns ErrCodeConfig if the API key is empty or doesn't carry an
+// aa_test_/aa_live_ prefix.
 func New(cfg Config) (*Client, error) {
 	if cfg.APIKey == "" {
 		return nil, newError(ErrCodeConfig, "APIKey is required", nil)
+	}
+	// Validate the prefix without ever echoing the key itself.
+	if !strings.HasPrefix(cfg.APIKey, "aa_test_") && !strings.HasPrefix(cfg.APIKey, "aa_live_") {
+		return nil, newError(ErrCodeConfig, "APIKey must start with 'aa_test_' or 'aa_live_'", nil)
 	}
 
 	verifyURL := cfg.VerifyURL
@@ -122,9 +128,9 @@ func (c *Client) ValidateContext(ctx context.Context, token string, requiredScop
 		if resp.StatusCode == 429 {
 			// Parse rate-limit headers
 			retryAfter := parseFloatHeader(resp, "Retry-After")
-			rlLimit     := parseIntHeader(resp, "X-RateLimit-Limit")
+			rlLimit := parseIntHeader(resp, "X-RateLimit-Limit")
 			rlRemaining := parseIntHeader(resp, "X-RateLimit-Remaining")
-			rlReset     := parseInt64Header(resp, "X-RateLimit-Reset")
+			rlReset := parseInt64Header(resp, "X-RateLimit-Reset")
 			resp.Body.Close()
 
 			if attempt >= c.maxRetries {
@@ -145,7 +151,7 @@ func (c *Client) ValidateContext(ctx context.Context, token string, requiredScop
 				waitMs = math.Min(delayMs, 30_000)
 			}
 			jitterMs := rand.Float64() * 500 // 0–500 ms
-			totalWait := time.Duration((waitMs+jitterMs)*float64(time.Millisecond))
+			totalWait := time.Duration((waitMs + jitterMs) * float64(time.Millisecond))
 
 			select {
 			case <-ctx.Done():
@@ -174,8 +180,23 @@ func (c *Client) ValidateContext(ctx context.Context, token string, requiredScop
 			return nil, newError(ErrCodeServiceUnavailable, "failed to decode introspection response", err)
 		}
 
+		// Derive ExpiresAt from the RFC 7662 `exp` claim for back-compat.
+		if info.ExpiresAt == "" && info.Exp > 0 {
+			info.ExpiresAt = time.Unix(info.Exp, 0).UTC().Format(time.RFC3339)
+		}
+
 		if !info.Active {
-			return nil, newError(ErrCodeInvalidToken, "token is invalid or revoked", nil)
+			// info.Error is one of the Verify* constants (e.g. token_expired,
+			// connection_expired, environment_mismatch); unknown codes pass
+			// through. insufficient_scope maps to the scopes error class.
+			reason := info.Error
+			if reason == "" {
+				reason = VerifyErrorInvalidToken
+			}
+			if reason == VerifyErrorInsufficientScope {
+				return nil, newError(ErrCodeInsufficientScopes, "token is not active: "+reason, nil)
+			}
+			return nil, newError(ErrCodeInvalidToken, "token is not active: "+reason, nil)
 		}
 
 		// Scope enforcement (AgentAdmit also enforces server-side, but this gives

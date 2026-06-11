@@ -199,9 +199,35 @@ if agentadmit.IsServiceUnavailable(err) { /* 503 */ }
 ```go
 client, err := agentadmit.New(agentadmit.Config{
     APIKey:    "aa_test_...",               // Required. From agentadmit.com.
-    VerifyURL: "https://api.agentadmit.com/v1/verify", // Optional. Default shown.
+    VerifyURL: "https://api.agentadmit.com/api/v1/verify", // Optional. Default shown.
     Timeout:   5 * time.Second,             // Optional. Default: 5s.
 })
+```
+
+## Issuing & Exchanging Tokens
+
+Issue a connection token for one of your users, hand it to their agent, and the agent exchanges it for an access token:
+
+```go
+// duration_seconds is tri-state:
+//   unset                              → AgentAdmit default (30 days)
+//   agentadmit.DurationUntilRevoked()  → until the user revokes
+//   agentadmit.Duration(3600)          → explicit seconds (60–31536000)
+issued, err := client.IssueToken("app_abc123", agentadmit.IssueTokenRequest{
+    UserID:          "user_42",
+    Scopes:          []string{"read:orders"},
+    DurationSeconds: agentadmit.DurationUntilRevoked(),
+})
+
+// Agent side — no API key needed; the connection token is the credential.
+granted, err := client.Exchange(agentadmit.ExchangeRequest{
+    Token:      issued.Token, // ag_ct_…
+    AgentLabel: "MyAssistant",
+})
+// granted.AccessToken (ag_at_…), granted.Scopes, granted.ConnectionID
+
+// Revoke when the user disconnects the agent.
+_, err = client.Revoke(agentadmit.RevokeRequest{ConnectionID: granted.ConnectionID})
 ```
 
 ## Context Support
@@ -366,5 +392,26 @@ config, err := client.GetAlertConfig(agentadmit.GetAlertConfigOptions{AppID: "ap
 AgentAdmit detects anomalies, fires alerts, and (with kill switch) auto-revokes connections. **How you notify your own users is up to you.** AgentAdmit provides the data — you deliver it through your own system (in-app notifications, email, push, etc.).
 
 - **Poll alerts** — Use the SDK methods above from your backend to check for new events, then notify users through your existing system.
-- **Webhook delivery (coming soon)** — Configure a webhook URL in your AgentAdmit dashboard. When an alert fires, AgentAdmit POSTs the payload to your server.
+- **Webhook delivery** — Configure a webhook URL in your AgentAdmit dashboard. When an alert fires, AgentAdmit POSTs the payload to your server, signed with your `whsec_…` secret. Always verify the signature against the raw request body before trusting the payload:
+
+  ```go
+  http.HandleFunc("/agentadmit/alerts", func(w http.ResponseWriter, r *http.Request) {
+      payload, err := io.ReadAll(r.Body)
+      if err != nil {
+          http.Error(w, "read error", http.StatusBadRequest)
+          return
+      }
+      if err := agentadmit.VerifyWebhookSignature(
+          payload,
+          r.Header.Get("X-AgentAdmit-Signature"),
+          os.Getenv("AGENTADMIT_WEBHOOK_SECRET"), // whsec_…
+      ); err != nil {
+          http.Error(w, "invalid signature", http.StatusBadRequest)
+          return
+      }
+      // payload is authentic — parse and handle the alert
+  })
+  ```
+
+  The header format is `t=<unix_ts>,v1=<hex>` — an HMAC-SHA256 of `{t}.{rawBody}` keyed with your signing secret. The helper compares in constant time and rejects timestamps more than 5 minutes off (replay protection); use `VerifyWebhookSignatureWithTolerance` to adjust.
 - **React SDK** — Embed the `<AlertsPanel>` component so users can view their own alert history and tighten thresholds.
