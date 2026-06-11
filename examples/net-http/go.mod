@@ -1,7 +1,7 @@
-module github.com/agentadmit/agentadmit-go/examples/net-http
+module github.com/PhoenixCo-Founder/agentadmit-go/examples/net-http
 
 go 1.21
 
-require github.com/agentadmit/agentadmit-go v0.0.0
+require github.com/PhoenixCo-Founder/agentadmit-go v0.0.0
 
-replace github.com/agentadmit/agentadmit-go => ../../
+replace github.com/PhoenixCo-Founder/agentadmit-go => ../../

@@ -62,9 +62,9 @@ func getWorkouts(w http.ResponseWriter, r *http.Request) {
 	if tokenInfo != nil {
 		// Agent request: respond with the agent's view.
 		resp = map[string]interface{}{
-			"source":  "agent_request",
-			"app_id":  tokenInfo.AppID,
-			"scopes":  tokenInfo.Scopes,
+			"source":   "agent_request",
+			"app_id":   tokenInfo.AppID,
+			"scopes":   tokenInfo.Scopes,
 			"workouts": sampleWorkouts(),
 		}
 	} else {
