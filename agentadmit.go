@@ -118,7 +118,7 @@ func (c *Client) ValidateContext(ctx context.Context, token string, requiredScop
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-		req.Header.Set("User-Agent", "agentadmit-go/1.0.0")
+		req.Header.Set("User-Agent", userAgent)
 
 		resp, err := c.http.Do(req)
 		if err != nil {
