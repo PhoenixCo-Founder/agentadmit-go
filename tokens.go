@@ -131,7 +131,7 @@ func (c *Client) ExchangeContext(ctx context.Context, req ExchangeRequest) (*Exc
 	}
 	// No Authorization header — the connection token is the credential.
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("User-Agent", "agentadmit-go/1.0.0")
+	httpReq.Header.Set("User-Agent", userAgent)
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
