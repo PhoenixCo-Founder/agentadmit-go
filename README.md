@@ -31,9 +31,9 @@ if err != nil {
 ## How It Works
 
 1. **User generates a token** in your app's Agent Access page (powered by the AgentAdmit React SDK)
-2. **User gives the token to their AI agent** — the token goes to the human, not the agent. No automated delivery = no prompt injection surface.
+2. **User gives the token to their AI agent** - the token goes to the human, not the agent. No automated delivery = no prompt injection surface.
 3. **Agent presents the token** on each API request via `Authorization: Bearer ag_at_...`
-4. **Your backend validates via AgentAdmit** — one SDK call enforces scopes, logs the request, and keeps access revocable
+4. **Your backend validates via AgentAdmit** - one SDK call enforces scopes, logs the request, and keeps access revocable
 
 ## net/http Middleware
 
@@ -57,15 +57,29 @@ mux.Handle("/api/workouts/create",
 http.ListenAndServe(":8080", mux)
 ```
 
+> **Security note:** `client.Middleware` is a dual-path middleware. Requests
+> that carry an AgentAdmit Bearer token are validated and scope-checked;
+> requests with no token pass through to your handler unchanged. This means
+> your handler will be called with `tokenInfo == nil` for regular user
+> requests. **You must enforce your own user authentication** for those
+> requests - either in the handler itself (check `tokenInfo != nil` else apply
+> your session/JWT check) or via a separate auth middleware that runs
+> alongside this one. Never expose protected data to callers who present
+> neither an AgentAdmit token nor valid user credentials.
+>
+> If a route should only ever be accessible by AI agents (never by regular
+> users), use `client.RequireAgentMiddleware` instead - it always demands a
+> valid AgentAdmit token and has no unauthenticated pass-through path.
+
 Access validated token info in your handler:
 
 ```go
 func getWorkouts(w http.ResponseWriter, r *http.Request) {
     tokenInfo := agentadmit.TokenFromContext(r.Context())
     if tokenInfo != nil {
-        // Agent request — tokenInfo.AppID, tokenInfo.Scopes
+        // Agent request - tokenInfo.AppID, tokenInfo.Scopes
     }
-    // Regular user request — your existing auth
+    // Regular user request - your existing auth
 }
 ```
 
@@ -144,7 +158,7 @@ func handleToolCall(ctx context.Context, req JSONRPCRequest) JSONRPCResponse {
         return jsonRPCError(err) // returns 401 or 403 JSON-RPC error
     }
 
-    // 3. Token is valid — execute the tool
+    // 3. Token is valid - execute the tool
     return executeTool(params.Name, params.Arguments, tokenInfo)
 }
 ```
@@ -219,7 +233,7 @@ issued, err := client.IssueToken("app_abc123", agentadmit.IssueTokenRequest{
     DurationSeconds: agentadmit.DurationUntilRevoked(),
 })
 
-// Agent side — no API key needed; the connection token is the credential.
+// Agent side - no API key needed; the connection token is the credential.
 granted, err := client.Exchange(agentadmit.ExchangeRequest{
     Token:      issued.Token, // ag_ct_…
     AgentLabel: "MyAssistant",
@@ -235,7 +249,7 @@ _, err = client.Revoke(agentadmit.RevokeRequest{ConnectionID: granted.Connection
 All SDK methods accept a `context.Context` for graceful cancellation and deadline propagation:
 
 ```go
-// Preferred in HTTP handlers — respects request cancellation
+// Preferred in HTTP handlers - respects request cancellation
 info, err := client.ValidateContext(r.Context(), token, scopes)
 ```
 
@@ -247,9 +261,9 @@ info, err := client.ValidateContext(r.Context(), token, scopes)
 
 **Mandatory introspection.** All token validation goes through `api.agentadmit.com`. There is no self-hosted mode. No local JWT validation. No bypass. This is required for security, audit logging, and real-time revocation.
 
-Every agent request triggers a call to AgentAdmit's introspection API. Latency is typically under 200ms and only applies to agent requests, never your regular user traffic. The AI agent is making the API call, not the user — latency here doesn't affect the user experience.
+Every agent request triggers a call to AgentAdmit's introspection API. Latency is typically under 200ms and only applies to agent requests, never your regular user traffic. The AI agent is making the API call, not the user - latency here doesn't affect the user experience.
 
-**Admin revocation.** As the app/server operator, you can revoke any user's agent connection via `DELETE /agentadmit/admin/connections/{connection_id}` (requires admin role or `manage:connections` scope). Your own AI agent can also revoke connections if given this scope, enabling automated abuse detection and response.
+**Admin revocation.** As the app/server operator, you can revoke any user's agent connection via `client.Revoke(RevokeRequest{ConnectionID: "..."})`, which calls `POST /api/v1/revoke` on the AgentAdmit hosted service. Your own AI agent can also trigger revocation if given the appropriate scope, enabling automated abuse detection and response.
 
 **Embeddable admin panel.** Drop the `<AgentAdmitAdminPanel>` React component into your admin section to view all agent connections, usage metrics, billing status, and revoke any connection without leaving your app. See the React SDK for details.
 
@@ -265,7 +279,7 @@ Every agent request triggers a call to AgentAdmit's introspection API. Latency i
 
 ## Rate Limiting
 
-The AgentAdmit introspection endpoint enforces rate limits. The Go SDK handles HTTP 429 responses **automatically** with exponential backoff and jitter — no changes needed in your handler or middleware code.
+The AgentAdmit introspection endpoint enforces rate limits. The Go SDK handles HTTP 429 responses **automatically** with exponential backoff and jitter - no changes needed in your handler or middleware code.
 
 ### Retry behavior
 
@@ -277,7 +291,7 @@ The AgentAdmit introspection endpoint enforces rate limits. The Go SDK handles H
 | Jitter | 0–500 ms | Random addition to each delay |
 | Max retries | **3** | Configurable via `Config.MaxRetries` |
 
-The SDK also respects the `Retry-After` response header — if present, it overrides the computed backoff delay. Context cancellation is respected during retry sleeps.
+The SDK also respects the `Retry-After` response header - if present, it overrides the computed backoff delay. Context cancellation is respected during retry sleeps.
 
 ### Configuring max retries
 
@@ -306,17 +320,17 @@ if err != nil {
 ```
 
 `RateLimitError` fields:
-- `RetryAfter` — seconds from `Retry-After` header (-1 if absent)
-- `Limit` — `X-RateLimit-Limit` header value (-1 if absent)
-- `Remaining` — `X-RateLimit-Remaining` header value (-1 if absent)
-- `Reset` — `X-RateLimit-Reset` Unix timestamp (-1 if absent)
-- `MaxRetries` — number of retry attempts that were made
+- `RetryAfter` - seconds from `Retry-After` header (-1 if absent)
+- `Limit` - `X-RateLimit-Limit` header value (-1 if absent)
+- `Remaining` - `X-RateLimit-Remaining` header value (-1 if absent)
+- `Reset` - `X-RateLimit-Reset` Unix timestamp (-1 if absent)
+- `MaxRetries` - number of retry attempts that were made
 
 Use `agentadmit.IsRateLimit(err)` for a quick boolean check.
 
 ## Security
 
-- Connection Tokens are hashed (SHA-256) before storage — plaintext is never persisted (spec §5.3.1)
+- Connection Tokens are hashed (SHA-256) before storage - plaintext is never persisted (spec §5.3.1)
 - All agent requests validated via mandatory introspection through AgentAdmit's hosted service
 - Tokens are displayed to users once and never retrievable again
 - User-mediated delivery eliminates prompt injection at the credential exchange layer
@@ -331,14 +345,14 @@ Full integration guide: https://agentadmit.com/docs/app-owner-guide
 The AgentAdmit Go SDK runs server-side and does not interact with app stores or end-user devices directly.
 
 ### What the SDK does
-- Validates AgentAdmit tokens by calling AgentAdmit's hosted introspection endpoint (`https://api.agentadmit.com/api/v1/verify`) on every agent request — this is mandatory introspection; there is no local or offline validation mode
+- Validates AgentAdmit tokens by calling AgentAdmit's hosted introspection endpoint (`https://api.agentadmit.com/api/v1/verify`) on every agent request - this is mandatory introspection; there is no local or offline validation mode
 - Enforces scope-based access control on your API routes
-- Manages connection lifecycle (create, revoke, audit) using your configured storage backend
+- Manages connection lifecycle (create, revoke) via the AgentAdmit hosted service
 
 ### What the SDK does NOT do
-- Does not transmit raw end-user PII (such as name, email, or device identifiers) — each introspection request sends the opaque access token and your API key
-- Does not perform passive background telemetry or analytics — network calls occur only during active token validation
-- Does not maintain its own persistent storage — local state (connections, audit log) lives in the storage backend you configure
+- Does not transmit raw end-user PII (such as name, email, or device identifiers) - each introspection request sends the opaque access token and your API key
+- Does not perform passive background telemetry or analytics - network calls occur only during active token validation
+- Does not maintain its own persistent storage - all connection state and audit logs are managed by the AgentAdmit hosted service
 
 ### What the AgentAdmit hosted service records
 On every token validation, AgentAdmit's `/api/v1/verify` endpoint receives the access token and API key, resolves the token to its `user_id`, `connection_id`, granted `scopes`, and `agent_label`, and records per-call metadata (including the endpoint and timestamp) for billing, audit logging, the security alerts engine, and usage metering. This is integral to how AgentAdmit works and applies to both test and live keys. See the "Mandatory introspection" notes above and the [compliance guide](https://agentadmit.com/docs/compliance) for the full data-handling description.
@@ -391,10 +405,10 @@ config, err := client.GetAlertConfig(agentadmit.GetAlertConfigOptions{AppID: "ap
 
 ### Notifying Your Users
 
-AgentAdmit detects anomalies, fires alerts, and (with kill switch) auto-revokes connections. **How you notify your own users is up to you.** AgentAdmit provides the data — you deliver it through your own system (in-app notifications, email, push, etc.).
+AgentAdmit detects anomalies, fires alerts, and (with kill switch) auto-revokes connections. **How you notify your own users is up to you.** AgentAdmit provides the data - you deliver it through your own system (in-app notifications, email, push, etc.).
 
-- **Poll alerts** — Use the SDK methods above from your backend to check for new events, then notify users through your existing system.
-- **Webhook delivery** — Configure a webhook URL in your AgentAdmit dashboard. When an alert fires, AgentAdmit POSTs the payload to your server, signed with your `whsec_…` secret. Always verify the signature against the raw request body before trusting the payload:
+- **Poll alerts** - Use the SDK methods above from your backend to check for new events, then notify users through your existing system.
+- **Webhook delivery** - Configure a webhook URL in your AgentAdmit dashboard. When an alert fires, AgentAdmit POSTs the payload to your server, signed with your `whsec_…` secret. Always verify the signature against the raw request body before trusting the payload:
 
   ```go
   http.HandleFunc("/agentadmit/alerts", func(w http.ResponseWriter, r *http.Request) {
@@ -411,9 +425,9 @@ AgentAdmit detects anomalies, fires alerts, and (with kill switch) auto-revokes 
           http.Error(w, "invalid signature", http.StatusBadRequest)
           return
       }
-      // payload is authentic — parse and handle the alert
+      // payload is authentic - parse and handle the alert
   })
   ```
 
-  The header format is `t=<unix_ts>,v1=<hex>` — an HMAC-SHA256 of `{t}.{rawBody}` keyed with your signing secret. The helper compares in constant time and rejects timestamps more than 5 minutes off (replay protection); use `VerifyWebhookSignatureWithTolerance` to adjust.
-- **React SDK** — Embed the `<AlertsPanel>` component so users can view their own alert history and tighten thresholds.
+  The header format is `t=<unix_ts>,v1=<hex>` - an HMAC-SHA256 of `{t}.{rawBody}` keyed with your signing secret. The helper compares in constant time and rejects timestamps more than 5 minutes off (replay protection); use `VerifyWebhookSignatureWithTolerance` to adjust.
+- **React SDK** - Embed the `<AlertsPanel>` component so users can view their own alert history and tighten thresholds.

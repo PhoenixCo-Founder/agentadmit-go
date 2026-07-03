@@ -108,10 +108,12 @@ func abortWithError(c *gin.Context, err error) {
 	c.AbortWithStatusJSON(500, gin.H{"error": "internal_error", "message": "Token validation failed"})
 }
 
+// bearerToken extracts the Bearer token from the Authorization header.
+// The scheme match is case-insensitive per RFC 7235.
 func bearerToken(c *gin.Context) string {
 	auth := c.GetHeader("Authorization")
-	if strings.HasPrefix(auth, "Bearer ") {
-		return strings.TrimPrefix(auth, "Bearer ")
+	if len(auth) > 7 && strings.EqualFold(auth[:7], "bearer ") {
+		return auth[7:]
 	}
 	return ""
 }
