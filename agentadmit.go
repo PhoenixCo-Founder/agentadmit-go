@@ -9,6 +9,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -49,9 +50,35 @@ type Client struct {
 	sleep func(ctx context.Context, d time.Duration) error
 }
 
+// requireHTTPS returns an error if rawURL does not use https, unless the host
+// is localhost, 127.0.0.1, or [::1] (in which case plain http is also
+// accepted to support local development and tests). An empty string is allowed
+// so callers can omit optional URL fields.
+func requireHTTPS(rawURL, fieldName string) error {
+	if rawURL == "" {
+		return nil
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return newError(ErrCodeConfig, fmt.Sprintf("%s is not a valid URL: %v", fieldName, err), err)
+	}
+	if u.Scheme == "https" {
+		return nil
+	}
+	if u.Scheme == "http" {
+		host := u.Hostname()
+		if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+			return nil
+		}
+	}
+	return newError(ErrCodeConfig,
+		fmt.Sprintf("%s must use https (got %q); http is only allowed for localhost/127.0.0.1/[::1]", fieldName, u.Scheme), nil)
+}
+
 // New creates a new AgentAdmit Client with the provided Config.
 // Returns ErrCodeConfig if the API key is empty or doesn't carry an
-// aa_test_/aa_live_ prefix.
+// aa_test_/aa_live_ prefix, or if any URL is not https (except
+// http on localhost / 127.0.0.1 / [::1]).
 func New(cfg Config) (*Client, error) {
 	if cfg.APIKey == "" {
 		return nil, newError(ErrCodeConfig, "APIKey is required", nil)
@@ -64,6 +91,9 @@ func New(cfg Config) (*Client, error) {
 	verifyURL := cfg.VerifyURL
 	if verifyURL == "" {
 		verifyURL = DefaultVerifyURL
+	}
+	if err := requireHTTPS(verifyURL, "VerifyURL"); err != nil {
+		return nil, err
 	}
 
 	timeout := cfg.Timeout
@@ -79,6 +109,9 @@ func New(cfg Config) (*Client, error) {
 	apiURLStr := cfg.APIURL
 	if apiURLStr == "" {
 		apiURLStr = DefaultAPIURL
+	}
+	if err := requireHTTPS(apiURLStr, "APIURL"); err != nil {
+		return nil, err
 	}
 
 	return &Client{
@@ -206,6 +239,15 @@ func (c *Client) ValidateContext(ctx context.Context, token string, requiredScop
 		if resp.StatusCode >= 500 {
 			return nil, newError(ErrCodeServiceUnavailable,
 				fmt.Sprintf("AgentAdmit service returned %d", resp.StatusCode), nil)
+		}
+
+		// Only treat a response as valid when the HTTP status is 2xx.
+		// A 4xx response (e.g. 400 {"active":true}) must never be honored —
+		// it indicates the request was malformed or the token was rejected
+		// at the transport level.
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, newError(ErrCodeInvalidToken,
+				fmt.Sprintf("introspection returned non-2xx status %d", resp.StatusCode), nil)
 		}
 
 		var info TokenInfo

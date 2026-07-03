@@ -111,11 +111,13 @@ func writeMiddlewareError(w http.ResponseWriter, err error) {
 }
 
 // bearerToken extracts the Bearer token from the Authorization header.
-// Returns "" if none is present.
+// The scheme match is case-insensitive per RFC 7235 §2.1 ("token68" scheme
+// names are case-insensitive). Returns "" if none is present.
 func bearerToken(r *http.Request) string {
 	auth := r.Header.Get("Authorization")
-	if strings.HasPrefix(auth, "Bearer ") {
-		return strings.TrimPrefix(auth, "Bearer ")
+	// Use a case-insensitive prefix check: accept "bearer ", "Bearer ", etc.
+	if len(auth) > 7 && strings.EqualFold(auth[:7], "bearer ") {
+		return auth[7:]
 	}
 	return ""
 }

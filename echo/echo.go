@@ -114,10 +114,12 @@ func toEchoError(err error) error {
 	})
 }
 
+// bearerToken extracts the Bearer token from the Authorization header.
+// The scheme match is case-insensitive per RFC 7235.
 func bearerToken(c echo.Context) string {
 	auth := c.Request().Header.Get("Authorization")
-	if strings.HasPrefix(auth, "Bearer ") {
-		return strings.TrimPrefix(auth, "Bearer ")
+	if len(auth) > 7 && strings.EqualFold(auth[:7], "bearer ") {
+		return auth[7:]
 	}
 	return ""
 }

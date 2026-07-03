@@ -31,18 +31,45 @@ func main() {
 	mux := http.NewServeMux()
 
 	// 2. Protect routes with AgentAdmit scope middleware.
-	//    Requests with no Bearer token pass through to your existing auth.
-	//    Requests with an AgentAdmit token are validated + scope-checked.
+	//
+	// client.Middleware is a "dual-path" middleware: requests that carry an
+	// AgentAdmit Bearer token are validated and scope-checked; requests with
+	// NO token pass through unchanged so your existing user-auth layer can
+	// handle them.
+	//
+	// IMPORTANT: because pass-through requests reach your handler with
+	// tokenInfo == nil, YOU must enforce user authentication for those
+	// requests in the handler itself (or via a separate auth middleware that
+	// runs before or after this one). Never expose data to callers who
+	// present neither an AgentAdmit token nor valid user credentials.
+	//
+	// Correct composition: run your user-auth middleware first, then
+	// client.Middleware. Example (stub shown — replace with your real auth):
+	//
+	//   mux.Handle("/api/workouts",
+	//       requireUserAuth(                       // your app's auth
+	//           client.Middleware("read:workouts")( // then agent check
+	//               http.HandlerFunc(getWorkouts),
+	//           ),
+	//       ),
+	//   )
+	//
+	// The handlers below demonstrate the correct per-handler fallback pattern
+	// (return 401 when tokenInfo is nil).
 	mux.Handle("/api/workouts",
 		client.Middleware("read:workouts")(http.HandlerFunc(getWorkouts)))
 
 	mux.Handle("/api/workouts/create",
 		client.Middleware("create:workouts")(http.HandlerFunc(createWorkout)))
 
+	// /api/meals uses the same dual-path pattern. The getMeals handler checks
+	// for a nil tokenInfo and falls back to your user-auth layer.
 	mux.Handle("/api/meals",
 		client.Middleware("read:meals")(http.HandlerFunc(getMeals)))
 
 	// 3. (Optional) An endpoint only accessible by AI agents — not regular users.
+	//    RequireAgentMiddleware always demands a valid AgentAdmit token; there
+	//    is no unauthenticated pass-through path.
 	mux.Handle("/api/agent-only",
 		client.RequireAgentMiddleware("read:workouts")(http.HandlerFunc(agentOnly)))
 
@@ -96,8 +123,20 @@ func createWorkout(w http.ResponseWriter, r *http.Request) {
 }
 
 func getMeals(w http.ResponseWriter, r *http.Request) {
+	tokenInfo := agentadmit.TokenFromContext(r.Context())
+	if tokenInfo == nil {
+		// No AgentAdmit token — enforce your app's own user authentication
+		// here before returning data. This stub rejects unauthenticated
+		// requests so the endpoint is never open without any credential.
+		// Replace this block with your session/JWT/cookie check in production.
+		http.Error(w, `{"error":"unauthorized","message":"authentication required"}`,
+			http.StatusUnauthorized)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
+		"app_id": tokenInfo.AppID,
 		"meals": []map[string]string{
 			{"name": "Oatmeal", "calories": "350"},
 			{"name": "Chicken & Rice", "calories": "650"},
