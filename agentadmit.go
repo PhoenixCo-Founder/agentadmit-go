@@ -25,6 +25,16 @@ const (
 // DefaultMaxRetries is the default number of retry attempts on HTTP 429.
 const DefaultMaxRetries = 3
 
+const (
+	// maxRetryWaitMs caps any single retry wait — including a
+	// server-supplied Retry-After, which is untrusted input.
+	maxRetryWaitMs = 30_000.0
+
+	// maxRetryBudgetMs caps cumulative wait across all retries of a
+	// single verify call.
+	maxRetryBudgetMs = 120_000.0
+)
+
 // Client is the AgentAdmit SDK client. Create one via New() and reuse it
 // across requests. It is safe for concurrent use.
 type Client struct {
@@ -33,6 +43,10 @@ type Client struct {
 	apiURLStr  string
 	http       *http.Client
 	maxRetries int
+
+	// sleep waits for d or until ctx is cancelled. Overridable in tests so
+	// retry behavior can be asserted without real waits.
+	sleep func(ctx context.Context, d time.Duration) error
 }
 
 // New creates a new AgentAdmit Client with the provided Config.
@@ -73,6 +87,14 @@ func New(cfg Config) (*Client, error) {
 		apiURLStr:  apiURLStr,
 		http:       &http.Client{Timeout: timeout},
 		maxRetries: maxRetries,
+		sleep: func(ctx context.Context, d time.Duration) error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(d):
+				return nil
+			}
+		},
 	}, nil
 }
 
@@ -109,7 +131,8 @@ func (c *Client) ValidateContext(ctx context.Context, token string, requiredScop
 	}
 
 	// Retry loop — handles 429 with exponential backoff + jitter.
-	delayMs := 1000.0 // initial backoff: 1 second (in ms)
+	delayMs := 1000.0  // initial backoff: 1 second (in ms)
+	waitedMs := 0.0    // cumulative wait across retries
 
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.verifyURL, bytes.NewReader(bodyBytes))
@@ -143,20 +166,30 @@ func (c *Client) ValidateContext(ctx context.Context, token string, requiredScop
 				}
 			}
 
-			// Compute wait: Retry-After beats exponential backoff; cap at 30s
-			var waitMs float64
+			// Compute wait: Retry-After beats exponential backoff, but both
+			// are capped — Retry-After is untrusted server input and must
+			// not pin the caller.
+			requestedMs := delayMs
 			if retryAfter >= 0 {
-				waitMs = retryAfter * 1000
-			} else {
-				waitMs = math.Min(delayMs, 30_000)
+				requestedMs = retryAfter * 1000
 			}
+			waitMs := math.Min(math.Max(requestedMs, 0), maxRetryWaitMs)
 			jitterMs := rand.Float64() * 500 // 0–500 ms
+
+			if waitedMs+waitMs+jitterMs > maxRetryBudgetMs {
+				return nil, &RateLimitError{
+					RetryAfter: retryAfter,
+					Limit:      rlLimit,
+					Remaining:  rlRemaining,
+					Reset:      rlReset,
+					MaxRetries: attempt,
+				}
+			}
+			waitedMs += waitMs + jitterMs
 			totalWait := time.Duration((waitMs + jitterMs) * float64(time.Millisecond))
 
-			select {
-			case <-ctx.Done():
-				return nil, newError(ErrCodeServiceUnavailable, "context cancelled during rate-limit retry", ctx.Err())
-			case <-time.After(totalWait):
+			if err := c.sleep(ctx, totalWait); err != nil {
+				return nil, newError(ErrCodeServiceUnavailable, "context cancelled during rate-limit retry", err)
 			}
 
 			delayMs = math.Min(delayMs*2, 30_000)
