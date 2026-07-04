@@ -218,6 +218,30 @@ client, err := agentadmit.New(agentadmit.Config{
 })
 ```
 
+## Checking User Consent
+
+AgentAdmit can host per-user consent switches for three independent caller classes: `human_session`, `in_app_ai`, and `external_agent`. No class's setting implies another's.
+
+**External agents:** the verify response already carries the verdict on `TokenInfo.Consent` (nil when absent):
+
+```go
+info, err := client.ValidateToken(token)
+if err == nil && info.Consent != nil && !info.Consent.Granted {
+    // the data owner has switched external agents off: return your own 403
+}
+```
+
+**Human sessions and in-app AI** never hold AgentAdmit tokens, so ask directly:
+
+```go
+verdict, err := client.CheckConsent("user_8842", agentadmit.CallerClassInAppAI, nil)
+if err == nil && !verdict.Granted {
+    // do not run AI over this user's data
+}
+```
+
+Consent is orthogonal to revocation: a denied verdict means your app returns its own 403; the connection and token stay valid so the user can flip consent back on without re-connecting. Write switches through `PUT /api/v1/consent/settings` from your backend; export the audit trail with `GET /api/v1/consent/export` (every plan).
+
 ## Issuing & Exchanging Tokens
 
 Issue a connection token for one of your users, hand it to their agent, and the agent exchanges it for an access token:

@@ -93,6 +93,10 @@ type TokenInfo struct {
 	// Error is set when Active is false — one of the VerifyError* constants
 	// (e.g. token_expired, connection_expired, environment_mismatch).
 	Error string `json:"error,omitempty"`
+
+	// Consent is the Consent Ledger verdict for the external-agent path.
+	// Additive; nil when the platform did not return one.
+	Consent *ConsentVerdict `json:"consent,omitempty"`
 }
 
 // ValidationResult is the full response envelope from the AgentAdmit
