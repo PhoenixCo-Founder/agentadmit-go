@@ -250,8 +250,8 @@ func (c *Client) ValidateContext(ctx context.Context, token string, requiredScop
 				fmt.Sprintf("introspection returned non-2xx status %d", resp.StatusCode), nil)
 		}
 
-		var info TokenInfo
-		if err := json.Unmarshal(respBytes, &info); err != nil {
+		info, err := decodeVerifyResponse(respBytes)
+		if err != nil {
 			return nil, newError(ErrCodeServiceUnavailable, "failed to decode introspection response", err)
 		}
 
@@ -284,11 +284,46 @@ func (c *Client) ValidateContext(ctx context.Context, token string, requiredScop
 			}
 		}
 
-		return &info, nil
+		return info, nil
 	}
 
 	// Should never be reached
 	return nil, newError(ErrCodeServiceUnavailable, "unexpected exit from retry loop", nil)
+}
+
+// decodeVerifyResponse decodes the introspection payload. The token fields
+// are validated strictly, exactly as before. The consent block is decoded
+// leniently in a second pass: it is additive metadata, so a type-malformed
+// consent block must not take down an otherwise valid verify. When the
+// consent block fails to unmarshal it is dropped and Consent is left nil.
+//
+// This does not weaken consent semantics: nil Consent means "no verdict",
+// and consent-gated callers must treat a missing or dropped verdict as not
+// granted (fail closed), the same as when the platform returns no verdict.
+func decodeVerifyResponse(data []byte) (*TokenInfo, error) {
+	// envelope shadows TokenInfo.Consent with a json.RawMessage at a
+	// shallower depth. encoding/json resolves the "consent" key to the
+	// shallowest field, so the raw bytes land in RawConsent and the
+	// embedded TokenInfo.Consent is never populated during this pass.
+	var envelope struct {
+		TokenInfo
+		RawConsent json.RawMessage `json:"consent"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return nil, err
+	}
+
+	info := envelope.TokenInfo
+	info.Consent = nil
+	if len(envelope.RawConsent) > 0 && string(envelope.RawConsent) != "null" {
+		var verdict ConsentVerdict
+		if err := json.Unmarshal(envelope.RawConsent, &verdict); err == nil {
+			info.Consent = &verdict
+		}
+		// On unmarshal failure the malformed consent block is dropped and
+		// verification proceeds without a verdict.
+	}
+	return &info, nil
 }
 
 // ---------------------------------------------------------------------------
