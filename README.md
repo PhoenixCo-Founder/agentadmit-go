@@ -242,6 +242,20 @@ if err == nil && !verdict.Granted {
 
 Consent is orthogonal to revocation: a denied verdict means your app returns its own 403; the connection and token stay valid so the user can flip consent back on without re-connecting. Write switches through `PUT /api/v1/consent/settings` from your backend; export the audit trail with `GET /api/v1/consent/export` (every plan).
 
+## Presence Verification
+
+The verify response can also carry a human-presence fact on `TokenInfo.Presence` (nil when absent): whether the human who authorized the connection completed a WebAuthn presence ceremony on the consent page. Gate sensitive actions with `IsPresenceVerified()`:
+
+```go
+info, err := client.Validate(token, nil)
+if err == nil && !info.IsPresenceVerified() {
+    // the connection was minted without a completed presence ceremony:
+    // return your own 403 for actions that require a present human
+}
+```
+
+`IsPresenceVerified()` is strict: it returns true only when the platform sent `presence.verified: true`. Older servers omit the block entirely, and connections minted without a ceremony report `verified: false`; both read as not verified, so presence-gated actions fail closed.
+
 ## Issuing & Exchanging Tokens
 
 Issue a connection token for one of your users, hand it to their agent, and the agent exchanges it for an access token:

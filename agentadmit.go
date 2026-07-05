@@ -292,22 +292,26 @@ func (c *Client) ValidateContext(ctx context.Context, token string, requiredScop
 }
 
 // decodeVerifyResponse decodes the introspection payload. The token fields
-// are validated strictly, exactly as before. The consent block is decoded
-// leniently in a second pass: it is additive metadata, so a type-malformed
-// consent block must not take down an otherwise valid verify. When the
-// consent block fails to unmarshal it is dropped and Consent is left nil.
+// are validated strictly, exactly as before. The consent and presence
+// blocks are decoded leniently in a second pass: they are additive
+// metadata, so a type-malformed block must not take down an otherwise
+// valid verify. When a block fails to unmarshal it is dropped and the
+// corresponding field is left nil.
 //
-// This does not weaken consent semantics: nil Consent means "no verdict",
-// and consent-gated callers must treat a missing or dropped verdict as not
-// granted (fail closed), the same as when the platform returns no verdict.
+// This does not weaken consent or presence semantics: nil Consent means
+// "no verdict" and nil Presence means "not verified"; gated callers must
+// treat a missing or dropped block as not granted / not verified (fail
+// closed), the same as when the platform returns none.
 func decodeVerifyResponse(data []byte) (*TokenInfo, error) {
-	// envelope shadows TokenInfo.Consent with a json.RawMessage at a
-	// shallower depth. encoding/json resolves the "consent" key to the
-	// shallowest field, so the raw bytes land in RawConsent and the
-	// embedded TokenInfo.Consent is never populated during this pass.
+	// envelope shadows TokenInfo.Consent and TokenInfo.Presence with
+	// json.RawMessage fields at a shallower depth. encoding/json resolves
+	// each key to the shallowest field, so the raw bytes land in
+	// RawConsent/RawPresence and the embedded TokenInfo fields are never
+	// populated during this pass.
 	var envelope struct {
 		TokenInfo
-		RawConsent json.RawMessage `json:"consent"`
+		RawConsent  json.RawMessage `json:"consent"`
+		RawPresence json.RawMessage `json:"presence"`
 	}
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return nil, err
@@ -322,6 +326,15 @@ func decodeVerifyResponse(data []byte) (*TokenInfo, error) {
 		}
 		// On unmarshal failure the malformed consent block is dropped and
 		// verification proceeds without a verdict.
+	}
+	info.Presence = nil
+	if len(envelope.RawPresence) > 0 && string(envelope.RawPresence) != "null" {
+		var presence Presence
+		if err := json.Unmarshal(envelope.RawPresence, &presence); err == nil {
+			info.Presence = &presence
+		}
+		// On unmarshal failure the malformed presence block is dropped and
+		// verification proceeds without a presence fact (not verified).
 	}
 	return &info, nil
 }

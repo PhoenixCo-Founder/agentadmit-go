@@ -97,6 +97,10 @@ type TokenInfo struct {
 	// Consent is the Consent Ledger verdict for the external-agent path.
 	// Additive; nil when the platform did not return one.
 	Consent *ConsentVerdict `json:"consent,omitempty"`
+
+	// Presence is the human-presence fact for the connection (WebAuthn
+	// step-up). Additive; nil when the platform did not return one.
+	Presence *Presence `json:"presence,omitempty"`
 }
 
 // ValidationResult is the full response envelope from the AgentAdmit
