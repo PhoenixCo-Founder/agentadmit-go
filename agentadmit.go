@@ -269,7 +269,9 @@ func (c *Client) ValidateContext(ctx context.Context, token string, requiredScop
 				reason = VerifyErrorInvalidToken
 			}
 			if reason == VerifyErrorInsufficientScope {
-				return nil, newError(ErrCodeInsufficientScopes, "token is not active: "+reason, nil)
+				scopeErr := newError(ErrCodeInsufficientScopes, "token is not active: "+reason, nil)
+				scopeErr.GrantedScopes = info.Scopes
+				return nil, scopeErr
 			}
 			return nil, newError(ErrCodeInvalidToken, "token is not active: "+reason, nil)
 		}
@@ -279,8 +281,11 @@ func (c *Client) ValidateContext(ctx context.Context, token string, requiredScop
 		if len(requiredScopes) > 0 {
 			missing := missingScopes(info.Scopes, requiredScopes)
 			if len(missing) > 0 {
-				return nil, newError(ErrCodeInsufficientScopes,
+				scopeErr := newError(ErrCodeInsufficientScopes,
 					fmt.Sprintf("token missing required scopes: %v", missing), nil)
+				scopeErr.RequiredScopes = missing
+				scopeErr.GrantedScopes = info.Scopes
+				return nil, scopeErr
 			}
 		}
 

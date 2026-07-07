@@ -1,7 +1,9 @@
 package agentadmit
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 )
@@ -95,7 +97,7 @@ func writeMiddlewareError(w http.ResponseWriter, err error) {
 			w.Write([]byte(`{"error":"invalid_token","message":"Token is invalid or revoked"}`))
 		case ErrCodeInsufficientScopes:
 			w.WriteHeader(http.StatusForbidden)
-			w.Write([]byte(`{"error":"insufficient_scope","message":"Token lacks required scopes"}`))
+			w.Write(insufficientScopeBody(aaErr))
 		case ErrCodeServiceUnavailable:
 			w.WriteHeader(http.StatusServiceUnavailable)
 			w.Write([]byte(`{"error":"service_unavailable","message":"AgentAdmit service unavailable"}`))
@@ -108,6 +110,37 @@ func writeMiddlewareError(w http.ResponseWriter, err error) {
 
 	w.WriteHeader(http.StatusInternalServerError)
 	w.Write([]byte(`{"error":"internal_error","message":"Token validation failed"}`))
+}
+
+// insufficientScopeBody builds the spec §6.4 403 body for a scope-enforcement
+// failure. It names the unmet scope (required_scope) and the scopes the token
+// actually carries (granted_scopes) so the agent can relay a precise step-up
+// request to the user, who can grant the additional scope through a new
+// user-mediated connection flow.
+func insufficientScopeBody(aaErr *AgentAdmitError) []byte {
+	granted := aaErr.GrantedScopes
+	if granted == nil {
+		granted = []string{}
+	}
+	body := struct {
+		Error         string   `json:"error"`
+		RequiredScope string   `json:"required_scope,omitempty"`
+		GrantedScopes []string `json:"granted_scopes"`
+		Message       string   `json:"message"`
+	}{
+		Error:         "insufficient_scope",
+		GrantedScopes: granted,
+		Message:       "Token lacks required scopes. The user can grant additional scopes through the AgentAdmit connection settings.",
+	}
+	if len(aaErr.RequiredScopes) > 0 {
+		body.RequiredScope = strings.Join(aaErr.RequiredScopes, " ")
+		body.Message = fmt.Sprintf("This action requires %s scope. The user can grant additional scopes through the AgentAdmit connection settings.", body.RequiredScope)
+	}
+	b, err := json.Marshal(body)
+	if err != nil {
+		return []byte(`{"error":"insufficient_scope","message":"Token lacks required scopes"}`)
+	}
+	return b
 }
 
 // bearerToken extracts the Bearer token from the Authorization header.

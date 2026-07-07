@@ -51,6 +51,16 @@ type AgentAdmitError struct {
 
 	// Cause is the underlying error, if any.
 	Cause error
+
+	// RequiredScopes lists the scopes the operation required but the token
+	// did not carry. Populated when Code is ErrCodeInsufficientScopes and
+	// the unmet scopes are known locally, so the agent can tell the user
+	// exactly which scope to grant through a new connection flow (step-up
+	// authorization).
+	RequiredScopes []string
+
+	// GrantedScopes lists the scopes the token actually carries, when known.
+	GrantedScopes []string
 }
 
 // Error implements the error interface.

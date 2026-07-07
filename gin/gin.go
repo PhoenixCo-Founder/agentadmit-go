@@ -18,6 +18,7 @@ package aggin
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/PhoenixCo-Founder/agentadmit-go"
@@ -97,7 +98,7 @@ func abortWithError(c *gin.Context, err error) {
 		case agentadmit.ErrCodeInvalidToken:
 			c.AbortWithStatusJSON(401, gin.H{"error": "invalid_token", "message": "Token is invalid or revoked"})
 		case agentadmit.ErrCodeInsufficientScopes:
-			c.AbortWithStatusJSON(403, gin.H{"error": "insufficient_scope", "message": "Token lacks required scopes"})
+			c.AbortWithStatusJSON(403, insufficientScopePayload(aaErr))
 		case agentadmit.ErrCodeServiceUnavailable:
 			c.AbortWithStatusJSON(503, gin.H{"error": "service_unavailable", "message": "AgentAdmit service unavailable"})
 		default:
@@ -116,4 +117,27 @@ func bearerToken(c *gin.Context) string {
 		return auth[7:]
 	}
 	return ""
+}
+
+// insufficientScopePayload builds the spec §6.4 403 body for a scope
+// enforcement failure. It names the unmet scope (required_scope) and the
+// scopes the token actually carries (granted_scopes) so the agent can relay
+// a precise step-up request to the user, who can grant the additional scope
+// through a new user-mediated connection flow.
+func insufficientScopePayload(aaErr *agentadmit.AgentAdmitError) gin.H {
+	granted := aaErr.GrantedScopes
+	if granted == nil {
+		granted = []string{}
+	}
+	payload := gin.H{
+		"error":          "insufficient_scope",
+		"granted_scopes": granted,
+		"message":        "Token lacks required scopes. The user can grant additional scopes through the AgentAdmit connection settings.",
+	}
+	if len(aaErr.RequiredScopes) > 0 {
+		rs := strings.Join(aaErr.RequiredScopes, " ")
+		payload["required_scope"] = rs
+		payload["message"] = fmt.Sprintf("This action requires %s scope. The user can grant additional scopes through the AgentAdmit connection settings.", rs)
+	}
+	return payload
 }
