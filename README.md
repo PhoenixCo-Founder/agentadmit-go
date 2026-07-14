@@ -242,6 +242,28 @@ if err == nil && !verdict.Granted {
 
 Consent is orthogonal to revocation: a denied verdict means your app returns its own 403; the connection and token stay valid so the user can flip consent back on without re-connecting. Write switches through `PUT /api/v1/consent/settings` from your backend; export the audit trail with `GET /api/v1/consent/export` (every plan).
 
+**One-middleware drop-in.** Instead of wiring the three paths by hand, `CallerConsentMiddleware` classifies the caller from the credential and evaluates the right independent path:
+
+```go
+mux.Handle("/api/records",
+    client.CallerConsentMiddleware(agentadmit.CallerConsentOptions{
+        // derive the class from your own credential structure, never caller input
+        ClassifyNonAgent: func(r *http.Request) string {
+            if r.Header.Get("X-Internal-AI") == internalSecret {
+                return agentadmit.CallerClassInAppAI
+            }
+            return agentadmit.CallerClassHumanSession
+        },
+        ResolveDataOwnerID: func(r *http.Request) string { return r.URL.Query().Get("owner_id") },
+        RequiredScope:      "read:records",
+    })(yourHandler),
+)
+// Downstream: agentadmit.CallerClassFromContext(ctx), agentadmit.TokenFromContext(ctx)
+// on the agent path, agentadmit.ConsentVerdictFromContext(ctx) on ledger-gated paths.
+```
+
+External agents are checked via hosted introspection (consent verdict plus scope); in-app AI via the Consent Ledger (fail closed); the human path defers to your own permission model unless `GateHuman` is set. It is a consent gate, not an authenticator, so mount it after your own authentication.
+
 ## Presence Verification
 
 The verify response can also carry a human-presence fact on `TokenInfo.Presence` (nil when absent): whether the human who authorized the connection completed a WebAuthn presence ceremony on the consent page. Gate sensitive actions with `IsPresenceVerified()`:
