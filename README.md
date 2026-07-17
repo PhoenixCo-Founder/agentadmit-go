@@ -262,7 +262,20 @@ mux.Handle("/api/records",
 // on the agent path, agentadmit.ConsentVerdictFromContext(ctx) on ledger-gated paths.
 ```
 
-External agents are checked via hosted introspection (consent verdict plus scope); in-app AI via the Consent Ledger (fail closed); the human path defers to your own permission model unless `GateHuman` is set. It is a consent gate, not an authenticator, so mount it after your own authentication.
+External agents are checked via hosted introspection — the consent verdict is evaluated **before** the scope check (a caller whose class the owner denied learns nothing about scope state or step-up), and an absent verdict is resolved through the Consent Ledger, fail-closed. In-app AI goes through the Consent Ledger (fail closed); the human path defers to your own permission model unless `GateHuman` is set. It is a consent gate, not an authenticator, so mount it after your own authentication.
+
+**Gin and Echo:** the same middleware is available as framework-native adapters wrapping the identical core logic — `aggin.CallerConsent(client, opts)` (a `gin.HandlerFunc`) and `agecho.CallerConsent(client, opts)` (an `echo.MiddlewareFunc`). On permitted requests the caller class and verdict ride the request context and `GetTokenInfo` works as usual:
+
+```go
+r.GET("/api/records", aggin.CallerConsent(client, agentadmit.CallerConsentOptions{
+    ResolveDataOwnerID: func(req *http.Request) string { return req.URL.Query().Get("owner_id") },
+    RequiredScope:      "read:records",
+}), recordsHandler)
+
+e.GET("/api/records", recordsHandler, agecho.CallerConsent(client, agentadmit.CallerConsentOptions{
+    RequiredScope: "read:records",
+}))
+```
 
 ## Presence Verification
 
