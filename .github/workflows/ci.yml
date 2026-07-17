@@ -1,0 +1,61 @@
+# CI: vet + tests + consumer-module smoke on every push/PR to main.
+#
+# The consumer-module smoke builds a bare module that imports the SDK and
+# references Client + CallerConsentMiddleware through a local replace. It is
+# the Go analogue of the clean-install smoke in the Python/Node SDK CI: only
+# a build from OUTSIDE the module catches a broken import path or export
+# surface that every in-repo `go test` invocation silently tolerates.
+# Action versions pinned to exact SHAs per supply chain policy.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: 'stable'
+
+      - name: Vet (root + gin + echo)
+        run: go vet ./...
+
+      - name: Test (root + gin + echo)
+        run: go test ./...
+
+      - name: Consumer-module smoke (import from an empty module)
+        run: |
+          mkdir /tmp/smoke && cd /tmp/smoke
+          go mod init smoke
+          go mod edit -replace github.com/PhoenixCo-Founder/agentadmit-go="$GITHUB_WORKSPACE"
+          cat > main.go <<'EOF'
+          package main
+
+          import (
+              "fmt"
+
+              agentadmit "github.com/PhoenixCo-Founder/agentadmit-go"
+          )
+
+          func main() {
+              client, err := agentadmit.New(agentadmit.Config{APIKey: "aa_test_smoke"})
+              if err != nil {
+                  panic(err)
+              }
+              middleware := client.CallerConsentMiddleware(agentadmit.CallerConsentOptions{})
+              fmt.Println("consumer smoke OK", middleware != nil)
+          }
+          EOF
+          go mod tidy
+          go build ./...
