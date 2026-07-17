@@ -15,7 +15,8 @@ package agentadmit
 //
 // external_agent: an ag_at_ access token -> hosted introspection, which
 // returns the external-agent consent verdict inline plus the granted scopes.
-// Enforced here directly.
+// The owner's consent verdict is evaluated BEFORE any scope check; an absent
+// or malformed verdict is resolved through the Consent Ledger, fail closed.
 //
 // in_app_ai: your application's own server-side AI code path -> the Consent
 // Ledger /consent/check for the in-app-AI class.
@@ -37,6 +38,7 @@ package agentadmit
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 )
@@ -154,28 +156,67 @@ func (c *Client) CallerConsentMiddleware(opts CallerConsentOptions) func(http.Ha
 	}
 }
 
-// serveExternalAgent enforces the external-agent path: hosted introspection
-// (which applies scope enforcement) plus the embedded consent verdict. A
-// present-and-denied verdict fails closed; an absent verdict means the
-// platform default (external-agent allowed) held.
+// serveExternalAgent enforces the external-agent path in patent FIG. 3 stage
+// order: hosted introspection authenticates the token, then the owner's
+// consent verdict is evaluated, and only then is the required scope checked.
+// Consent comes first so a caller whose class the owner denied learns nothing
+// about scope state (no granted_scopes, no step-up guidance).
+//
+// The hosted service deliberately omits the consent block when its
+// consent-store read fails (designed degraded mode), so an absent or
+// malformed verdict is NEVER a grant: it is resolved through the Consent
+// Ledger for the token's owner, and an erroring ledger or unresolvable owner
+// fails closed (503 consent_unavailable). Access requires a resolved verdict
+// whose Granted is exactly true.
 func (c *Client) serveExternalAgent(w http.ResponseWriter, r *http.Request, next http.Handler, opts CallerConsentOptions) {
-	var requiredScopes []string
-	if opts.RequiredScope != "" {
-		requiredScopes = []string{opts.RequiredScope}
-	}
-
-	info, err := c.ValidateContext(r.Context(), bearerToken(r), requiredScopes)
+	// Authenticate WITHOUT scope enforcement: the scope check runs after the
+	// consent gate, below.
+	info, err := c.ValidateContext(r.Context(), bearerToken(r), nil)
 	if err != nil {
 		writeMiddlewareError(w, err)
 		return
 	}
 
-	if info.Consent != nil && !info.Consent.Granted {
+	// Resolve the consent verdict. decodeVerifyResponse drops a malformed
+	// consent block, so nil covers both absent and malformed.
+	verdict := info.Consent
+	if verdict == nil {
+		owner := info.UserID
+		if owner == "" {
+			writeJSONError(w, http.StatusServiceUnavailable,
+				`{"error":"consent_unavailable","message":"Introspection carried no consent verdict and no resolvable data owner"}`)
+			return
+		}
+		verdict, err = c.CheckConsentContext(r.Context(), owner, CallerClassExternalAgent, opts.ScopeGroup)
+		if err != nil {
+			// Fail closed: an unreachable or erroring ledger denies, never allows.
+			writeJSONError(w, http.StatusServiceUnavailable,
+				`{"error":"consent_unavailable","message":"Consent check failed"}`)
+			return
+		}
+	}
+	if !verdict.Granted {
 		writeJSONError(w, http.StatusForbidden,
 			`{"error":"consent_not_granted","caller_class":"external_agent","message":"The data owner has not enabled external agent access."}`)
 		return
 	}
 
+	// Scope check — after the consent gate, producing the same spec §6.4
+	// step-up body as before (error, required_scope, granted_scopes).
+	if opts.RequiredScope != "" {
+		if missing := missingScopes(info.Scopes, []string{opts.RequiredScope}); len(missing) > 0 {
+			scopeErr := newError(ErrCodeInsufficientScopes,
+				fmt.Sprintf("token missing required scopes: %v", missing), nil)
+			scopeErr.RequiredScopes = missing
+			scopeErr.GrantedScopes = info.Scopes
+			writeMiddlewareError(w, scopeErr)
+			return
+		}
+	}
+
+	// The resolved verdict travels with the TokenInfo on the request context,
+	// exactly as an inline verdict does.
+	info.Consent = verdict
 	next.ServeHTTP(w, r.WithContext(contextWithToken(r.Context(), info)))
 }
 
