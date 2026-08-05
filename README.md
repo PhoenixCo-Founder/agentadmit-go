@@ -317,6 +317,31 @@ granted, err := client.Exchange(agentadmit.ExchangeRequest{
 _, err = client.Revoke(agentadmit.RevokeRequest{ConnectionID: granted.ConnectionID})
 ```
 
+## Declared Purpose
+
+Declared purpose: the user-facing reason recorded on the grant at the consent moment. It is a review-time record only, never an enforcement input; authorization decisions ride scopes, connection status, and consent.
+
+Declare it when issuing a connection token (optional, max 300 characters — the SDK rejects longer values before calling the API):
+
+```go
+issued, err := client.IssueToken("app_abc123", agentadmit.IssueTokenRequest{
+    UserID:  "user_42",
+    Scopes:  []string{"read:orders"},
+    Purpose: "Rebook my Tuesday class when a spot opens",
+})
+```
+
+It comes back on verification as `TokenInfo.Purpose`, so your handlers and audit logs can show reviewers why the user connected the agent. An empty string means no purpose was declared:
+
+```go
+info, err := client.Validate(token, []string{"read:orders"})
+if err == nil && info.Purpose != "" {
+    log.Printf("request under declared purpose: %q", info.Purpose)
+}
+```
+
+Do not branch authorization on `Purpose` — grant or deny with scopes, connection status, and consent, and treat the purpose as context for humans reviewing the connection later.
+
 ## Context Support
 
 All SDK methods accept a `context.Context` for graceful cancellation and deadline propagation:

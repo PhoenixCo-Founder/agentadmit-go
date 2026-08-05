@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"unicode/utf8"
 )
 
 // DurationSeconds expresses the tri-state `duration_seconds` field on
@@ -56,7 +57,17 @@ type IssueTokenRequest struct {
 	// hosted default (30 days), DurationUntilRevoked() for until-revoked,
 	// or Duration(n) for an explicit duration. See DurationSeconds.
 	DurationSeconds *DurationSeconds `json:"duration_seconds,omitempty"`
+
+	// Purpose is the declared purpose: the user-facing reason recorded on
+	// the grant at the consent moment. Optional; max 300 characters. It is
+	// a review-time record only, never an enforcement input; authorization
+	// decisions ride scopes, connection status, and consent.
+	Purpose string `json:"purpose,omitempty"`
 }
+
+// maxPurposeChars is the maximum length of a declared purpose, matching the
+// hosted service's limit.
+const maxPurposeChars = 300
 
 // IssueTokenResponse is returned by POST /api/v1/apps/{app_id}/token.
 type IssueTokenResponse struct {
@@ -78,6 +89,9 @@ func (c *Client) IssueToken(appID string, req IssueTokenRequest) (*IssueTokenRes
 
 // IssueTokenContext is the context-aware variant of IssueToken.
 func (c *Client) IssueTokenContext(ctx context.Context, appID string, req IssueTokenRequest) (*IssueTokenResponse, error) {
+	if n := utf8.RuneCountInString(req.Purpose); n > maxPurposeChars {
+		return nil, fmt.Errorf("agentadmit: purpose exceeds %d characters (got %d)", maxPurposeChars, n)
+	}
 	respBytes, _, err := c.callManagementAPI(ctx, http.MethodPost, "/api/v1/apps/"+appID+"/token", req)
 	if err != nil {
 		return nil, err

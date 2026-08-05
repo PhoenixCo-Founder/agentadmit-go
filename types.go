@@ -78,6 +78,13 @@ type TokenInfo struct {
 	// Role is the user's role granted on the connection.
 	Role string `json:"role,omitempty"`
 
+	// Purpose is the declared purpose: the user-facing reason recorded on
+	// the grant at the consent moment. Empty when none was declared (the
+	// hosted service returns it as nullable). It is a review-time record
+	// only, never an enforcement input; authorization decisions ride
+	// scopes, connection status, and consent.
+	Purpose string `json:"purpose,omitempty"`
+
 	// AppID is the AgentAdmit application identifier.
 	AppID string `json:"app_id"`
 
