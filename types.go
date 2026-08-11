@@ -85,6 +85,14 @@ type TokenInfo struct {
 	// scopes, connection status, and consent.
 	Purpose string `json:"purpose,omitempty"`
 
+	// UserIntent is the user-declared intent: the user's own words, typed
+	// at the consent moment (distinct from Purpose, which is the app's
+	// words). Empty when none was declared (the hosted service returns it
+	// as nullable). It is a review-time record only, never an enforcement
+	// input; authorization decisions ride scopes, connection status, and
+	// consent.
+	UserIntent string `json:"user_intent,omitempty"`
+
 	// AppID is the AgentAdmit application identifier.
 	AppID string `json:"app_id"`
 

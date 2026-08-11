@@ -342,6 +342,32 @@ if err == nil && info.Purpose != "" {
 
 Do not branch authorization on `Purpose` — grant or deny with scopes, connection status, and consent, and treat the purpose as context for humans reviewing the connection later.
 
+## User-Declared Intent
+
+User-declared intent: the user's own words, typed at the consent moment. Where `Purpose` is the app's words (why the app wants access), `UserIntent` is what the user said they want done. It is a review-time record only, never an enforcement input; authorization decisions ride scopes, connection status, and consent.
+
+Declare it when issuing a connection token (optional, max 300 characters — the SDK rejects longer values before calling the API):
+
+```go
+issued, err := client.IssueToken("app_abc123", agentadmit.IssueTokenRequest{
+    UserID:     "user_42",
+    Scopes:     []string{"read:orders"},
+    Purpose:    "Rebook my Tuesday class when a spot opens",
+    UserIntent: "just rebook my tuesday spin class, nothing else",
+})
+```
+
+It flows exactly like the declared purpose: recorded on the grant, returned on verification, and carried on the connection's audit rows and ledger events. When the hosted presence ceremony runs, it is included in the verifiable-consent-evidence commitment alongside the declared purpose. It comes back on verification as `TokenInfo.UserIntent`; an empty string means the user declared nothing:
+
+```go
+info, err := client.Validate(token, []string{"read:orders"})
+if err == nil && info.UserIntent != "" {
+    log.Printf("user's declared intent: %q", info.UserIntent)
+}
+```
+
+Do not branch authorization on `UserIntent` — grant or deny with scopes, connection status, and consent, and treat the user's words as context for humans reviewing the connection later.
+
 ## Context Support
 
 All SDK methods accept a `context.Context` for graceful cancellation and deadline propagation:
