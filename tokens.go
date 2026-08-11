@@ -63,11 +63,22 @@ type IssueTokenRequest struct {
 	// a review-time record only, never an enforcement input; authorization
 	// decisions ride scopes, connection status, and consent.
 	Purpose string `json:"purpose,omitempty"`
+
+	// UserIntent is the user-declared intent: the user's own words, typed
+	// at the consent moment (distinct from Purpose, which is the app's
+	// words). Optional; max 300 characters. It is a review-time record
+	// only, never an enforcement input; authorization decisions ride
+	// scopes, connection status, and consent.
+	UserIntent string `json:"user_intent,omitempty"`
 }
 
 // maxPurposeChars is the maximum length of a declared purpose, matching the
 // hosted service's limit.
 const maxPurposeChars = 300
+
+// maxUserIntentChars is the maximum length of a user-declared intent,
+// matching the hosted service's limit.
+const maxUserIntentChars = 300
 
 // IssueTokenResponse is returned by POST /api/v1/apps/{app_id}/token.
 type IssueTokenResponse struct {
@@ -91,6 +102,9 @@ func (c *Client) IssueToken(appID string, req IssueTokenRequest) (*IssueTokenRes
 func (c *Client) IssueTokenContext(ctx context.Context, appID string, req IssueTokenRequest) (*IssueTokenResponse, error) {
 	if n := utf8.RuneCountInString(req.Purpose); n > maxPurposeChars {
 		return nil, fmt.Errorf("agentadmit: purpose exceeds %d characters (got %d)", maxPurposeChars, n)
+	}
+	if n := utf8.RuneCountInString(req.UserIntent); n > maxUserIntentChars {
+		return nil, fmt.Errorf("agentadmit: user_intent exceeds %d characters (got %d)", maxUserIntentChars, n)
 	}
 	respBytes, _, err := c.callManagementAPI(ctx, http.MethodPost, "/api/v1/apps/"+appID+"/token", req)
 	if err != nil {
