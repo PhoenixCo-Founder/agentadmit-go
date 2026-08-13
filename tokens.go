@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"time"
 	"unicode/utf8"
 )
 
@@ -70,7 +72,58 @@ type IssueTokenRequest struct {
 	// only, never an enforcement input; authorization decisions ride
 	// scopes, connection status, and consent.
 	UserIntent string `json:"user_intent,omitempty"`
+
+	// Presence is an app-attested ceremony fact: set it AFTER verifying and
+	// consuming your app's own fresh, purpose-bound WebAuthn/passkey
+	// attestation for this mint. Optional; nil means no ceremony fact. See
+	// AppAttestedPresence for the contract and honesty ceiling.
+	Presence *AppAttestedPresence `json:"presence,omitempty"`
 }
+
+// AppAttestedPresence is a ceremony fact your app attests at token issuance.
+//
+// The SDK forwards it to the hosted mint as
+// presence {verified: true, uv: true, method, verified_at}; the hosted
+// service stores it method-prefixed "app:<method>" — the provenance marker
+// that keeps app-attested facts distinct from hosted-witnessed ceremonies.
+//
+// Honesty ceiling: this is YOUR attestation, recorded and provenance-marked,
+// not witnessed by AgentAdmit and not independently verifiable. Only attest
+// a ceremony that verified the user with UV (biometric or PIN user
+// verification); verified/uv serialize as literal true and cannot represent
+// anything else — a ceremony without UV carries no presence fact, so leave
+// IssueTokenRequest.Presence nil.
+//
+// VerifiedAt must be set (non-zero) and recent: the hosted service enforces
+// a 10-minute freshness window with 60 seconds of future clock-skew slack.
+// time.Time marshals RFC 3339 with an explicit offset, which the hosted
+// contract requires.
+type AppAttestedPresence struct {
+	// Method is your ceremony mechanism, 1-60 lowercase
+	// alphanumeric/underscore characters (e.g. "my_webauthn").
+	Method string
+
+	// VerifiedAt is when the ceremony completed.
+	VerifiedAt time.Time
+}
+
+// MarshalJSON implements json.Marshaler, emitting the literal-true
+// verified/uv fields of the hosted contract.
+func (p AppAttestedPresence) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Verified   bool      `json:"verified"`
+		UV         bool      `json:"uv"`
+		Method     string    `json:"method"`
+		VerifiedAt time.Time `json:"verified_at"`
+	}{true, true, p.Method, p.VerifiedAt})
+}
+
+// presenceMethodRE is the hosted contract for AppAttestedPresence.Method.
+var presenceMethodRE = regexp.MustCompile(`^[a-z0-9_]+$`)
+
+// maxPresenceMethodChars is the maximum length of a presence method,
+// matching the hosted service's limit.
+const maxPresenceMethodChars = 60
 
 // maxPurposeChars is the maximum length of a declared purpose, matching the
 // hosted service's limit.
@@ -105,6 +158,17 @@ func (c *Client) IssueTokenContext(ctx context.Context, appID string, req IssueT
 	}
 	if n := utf8.RuneCountInString(req.UserIntent); n > maxUserIntentChars {
 		return nil, fmt.Errorf("agentadmit: user_intent exceeds %d characters (got %d)", maxUserIntentChars, n)
+	}
+	if req.Presence != nil {
+		// Validate against the hosted contract before any HTTP call — a
+		// malformed fact would 400 at the hosted mint (and a zero VerifiedAt
+		// would serialize as year 1, failing the freshness window).
+		if !presenceMethodRE.MatchString(req.Presence.Method) || len(req.Presence.Method) > maxPresenceMethodChars {
+			return nil, fmt.Errorf("agentadmit: presence method must be 1-%d lowercase alphanumeric/underscore characters", maxPresenceMethodChars)
+		}
+		if req.Presence.VerifiedAt.IsZero() {
+			return nil, fmt.Errorf("agentadmit: presence verified_at must be set (the ceremony that authorized this mint just happened)")
+		}
 	}
 	respBytes, _, err := c.callManagementAPI(ctx, http.MethodPost, "/api/v1/apps/"+appID+"/token", req)
 	if err != nil {
