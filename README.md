@@ -368,6 +368,25 @@ if err == nil && info.UserIntent != "" {
 
 Do not branch authorization on `UserIntent` — grant or deny with scopes, connection status, and consent, and treat the user's words as context for humans reviewing the connection later.
 
+## App-Attested Presence
+
+If your app gates token minting behind its own embedded passkey/WebAuthn ceremony, AgentAdmit never witnesses that ceremony (it is origin-bound), so by default the hosted service reports `presence.verified: false` for those connections. Attest the ceremony fact at issuance to close that gap — AFTER verifying and consuming your own fresh, purpose-bound attestation:
+
+```go
+issued, err := client.IssueToken("app_abc123", agentadmit.IssueTokenRequest{
+    UserID: "user_42",
+    Scopes: []string{"read:orders"},
+    Presence: &agentadmit.AppAttestedPresence{
+        Method:     "my_webauthn",          // lowercase alphanumeric/underscore
+        VerifiedAt: attestation.CreatedAt,  // when the ceremony completed
+    },
+})
+```
+
+The SDK sends it as `presence: {verified: true, uv: true, method, verified_at}` — `verified`/`uv` are literal true by construction and cannot represent anything else. The hosted service validates freshness (10-minute window, 60 s future clock-skew slack) and stores the method provenance-marked `app:<method>` so app-attested facts stay distinct from ceremonies AgentAdmit witnessed itself. Introspection, the grant-event ledger, and the evidence API then carry `presence.verified: true` for the connection.
+
+Honesty ceiling: this is your app's attestation, recorded and provenance-marked. It is not witnessed by AgentAdmit and not independently verifiable. Only attest a ceremony that verified the user with UV (biometric or PIN user verification); a ceremony without UV carries no presence fact, so leave `Presence` nil. An out-of-contract `Method` or a zero `VerifiedAt` fails client-side before any HTTP call.
+
 ## Context Support
 
 All SDK methods accept a `context.Context` for graceful cancellation and deadline propagation:
