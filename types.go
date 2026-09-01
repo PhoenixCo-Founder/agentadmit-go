@@ -137,11 +137,12 @@ type ValidationResult struct {
 // The telemetry fields (scope_used, endpoint, method) are optional and
 // omitted entirely when unknown — never sent as null or empty strings.
 type verifyRequest struct {
-	Token     string   `json:"token"`
-	Scopes    []string `json:"scopes,omitempty"`
-	ScopeUsed string   `json:"scope_used,omitempty"`
-	Endpoint  string   `json:"endpoint,omitempty"`
-	Method    string   `json:"method,omitempty"`
+	Token        string   `json:"token"`
+	Scopes       []string `json:"scopes,omitempty"`
+	ScopeUsed    string   `json:"scope_used,omitempty"`
+	Endpoint     string   `json:"endpoint,omitempty"`
+	Method       string   `json:"method,omitempty"`
+	ConsentFirst bool     `json:"consent_first,omitempty"`
 }
 
 // VerifyTelemetry carries optional per-call audit fields sent with the
@@ -165,6 +166,10 @@ type VerifyTelemetry struct {
 	ScopeUsed string
 	Endpoint  string
 	Method    string
+	// ConsentFirst asks the hosted service to resolve caller-class consent
+	// before evaluating ScopeUsed. CallerConsentMiddleware sets this
+	// automatically so denied classes cannot learn scope state.
+	ConsentFirst bool
 }
 
 // contextKey is the unexported type used to store TokenInfo in a

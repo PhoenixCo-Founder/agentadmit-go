@@ -182,8 +182,8 @@ func (c *Client) ValidateContextWithTelemetry(ctx context.Context, token string,
 	}
 
 	// Retry loop — handles 429 with exponential backoff + jitter.
-	delayMs := 1000.0  // initial backoff: 1 second (in ms)
-	waitedMs := 0.0    // cumulative wait across retries
+	delayMs := 1000.0 // initial backoff: 1 second (in ms)
+	waitedMs := 0.0   // cumulative wait across retries
 
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.verifyURL, bytes.NewReader(bodyBytes))
@@ -418,6 +418,7 @@ func applyTelemetry(body *verifyRequest, tel *VerifyTelemetry) {
 		body.Endpoint = truncateRunes(endpoint, maxEndpointChars)
 	}
 	body.Method = truncateRunes(strings.ToUpper(strings.TrimSpace(tel.Method)), maxMethodChars)
+	body.ConsentFirst = tel.ConsentFirst
 }
 
 // truncateRunes returns s truncated to at most max runes.
