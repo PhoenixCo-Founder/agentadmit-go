@@ -170,8 +170,11 @@ func (c *Client) CallerConsentMiddleware(opts CallerConsentOptions) func(http.Ha
 // whose Granted is exactly true.
 func (c *Client) serveExternalAgent(w http.ResponseWriter, r *http.Request, next http.Handler, opts CallerConsentOptions) {
 	// Authenticate WITHOUT scope enforcement: the scope check runs after the
-	// consent gate, below.
-	info, err := c.ValidateContext(r.Context(), bearerToken(r), nil)
+	// consent gate, below. Telemetry deliberately excludes scope_used here —
+	// sending it would let the hosted scope check answer before this
+	// middleware's consent-first gate, leaking scope state to callers whose
+	// class the owner denied. Endpoint/method still ride for the audit log.
+	info, err := c.ValidateContextWithTelemetry(r.Context(), bearerToken(r), nil, RequestTelemetry(r))
 	if err != nil {
 		writeMiddlewareError(w, err)
 		return

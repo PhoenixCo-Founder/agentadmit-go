@@ -53,6 +53,12 @@ const (
 	VerifyErrorConnectionExpired   = "connection_expired"
 	VerifyErrorEnvironmentMismatch = "environment_mismatch"
 	VerifyErrorInsufficientScope   = "insufficient_scope"
+
+	// VerifyErrorBoundExceeded is returned by the hosted service on an
+	// otherwise-active token whose bounded capability (e.g. a spend or
+	// call bound) is exhausted for this call. The SDK treats any error
+	// on an active response as a denial — see ErrCodeCallRefused.
+	VerifyErrorBoundExceeded = "bound_exceeded"
 )
 
 // TokenInfo contains validated token metadata returned by AgentAdmit
@@ -128,9 +134,37 @@ type ValidationResult struct {
 }
 
 // verifyRequest is the JSON body sent to the AgentAdmit verify endpoint.
+// The telemetry fields (scope_used, endpoint, method) are optional and
+// omitted entirely when unknown — never sent as null or empty strings.
 type verifyRequest struct {
-	Token  string   `json:"token"`
-	Scopes []string `json:"scopes,omitempty"`
+	Token     string   `json:"token"`
+	Scopes    []string `json:"scopes,omitempty"`
+	ScopeUsed string   `json:"scope_used,omitempty"`
+	Endpoint  string   `json:"endpoint,omitempty"`
+	Method    string   `json:"method,omitempty"`
+}
+
+// VerifyTelemetry carries optional per-call audit fields sent with the
+// introspection request so the hosted audit log can record which scope,
+// endpoint, and method each verified call exercised. Every field is
+// optional: leave a field empty ("") to omit it from the request.
+//
+// The SDK sanitizes each field before sending:
+//   - ScopeUsed: the single scope being enforced for this call. Never a
+//     joined list — leave empty when no single scope is known. Capped at
+//     120 characters.
+//   - Endpoint: the inbound request path, path only. Anything from the
+//     first "?" or "#" on is stripped (query strings can carry PII), then
+//     the result is truncated to 500 characters.
+//   - Method: the HTTP method, uppercased and capped at 20 characters.
+//
+// Middleware populates this automatically via RequestTelemetry. Direct
+// callers can pass their own values to ValidateWithTelemetry /
+// ValidateContextWithTelemetry, or nil to send no telemetry.
+type VerifyTelemetry struct {
+	ScopeUsed string
+	Endpoint  string
+	Method    string
 }
 
 // contextKey is the unexported type used to store TokenInfo in a

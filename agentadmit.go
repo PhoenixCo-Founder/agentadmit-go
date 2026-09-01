@@ -149,15 +149,33 @@ func (c *Client) Validate(token string, requiredScopes []string) (*TokenInfo, er
 // ValidateContext is the context-aware variant of Validate. Prefer this in
 // HTTP handlers so the introspection call respects request cancellation.
 func (c *Client) ValidateContext(ctx context.Context, token string, requiredScopes []string) (*TokenInfo, error) {
+	return c.ValidateContextWithTelemetry(ctx, token, requiredScopes, nil)
+}
+
+// ValidateWithTelemetry is Validate plus optional per-call audit telemetry
+// (scope_used, endpoint, method) sent with the introspection request so the
+// hosted audit log records what each verified call exercised. Pass nil to
+// send no telemetry. See VerifyTelemetry for field semantics.
+func (c *Client) ValidateWithTelemetry(token string, requiredScopes []string, tel *VerifyTelemetry) (*TokenInfo, error) {
+	return c.ValidateContextWithTelemetry(context.Background(), token, requiredScopes, tel)
+}
+
+// ValidateContextWithTelemetry is the context-aware variant of
+// ValidateWithTelemetry. The middleware in this package and the gin/echo
+// subpackages call it with telemetry derived from the inbound request via
+// RequestTelemetry.
+func (c *Client) ValidateContextWithTelemetry(ctx context.Context, token string, requiredScopes []string, tel *VerifyTelemetry) (*TokenInfo, error) {
 	if token == "" {
 		return nil, newError(ErrCodeInvalidToken, "token is empty", nil)
 	}
 
-	// Build request body
+	// Build request body — telemetry fields are sanitized and omitted when
+	// unknown (omitempty; never null / empty string).
 	reqBody := verifyRequest{
 		Token:  token,
 		Scopes: requiredScopes,
 	}
+	applyTelemetry(&reqBody, tel)
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, newError(ErrCodeConfig, "failed to marshal verify request", err)
@@ -276,6 +294,15 @@ func (c *Client) ValidateContext(ctx context.Context, token string, requiredScop
 			return nil, newError(ErrCodeInvalidToken, "token is not active: "+reason, nil)
 		}
 
+		// Active-error fail-closed: an introspection response with
+		// active: true AND an error field is a DENIAL of this specific call,
+		// never a pass-through. The hosted service refuses calls this way
+		// (e.g. bound_exceeded on bounded capabilities); honoring only
+		// `active` would allow refused calls through.
+		if info.Error != "" {
+			return nil, activeErrorDenial(info, respBytes, requiredScopes)
+		}
+
 		// Scope enforcement (AgentAdmit also enforces server-side, but this gives
 		// a clear local error for logging and fast-fail before sending data).
 		if len(requiredScopes) > 0 {
@@ -342,6 +369,126 @@ func decodeVerifyResponse(data []byte) (*TokenInfo, error) {
 		// verification proceeds without a presence fact (not verified).
 	}
 	return &info, nil
+}
+
+// ---------------------------------------------------------------------------
+// Per-call audit telemetry
+// ---------------------------------------------------------------------------
+
+// telemetry field caps, mirroring the hosted verify contract.
+const (
+	maxScopeUsedChars = 120
+	maxEndpointChars  = 500
+	maxMethodChars    = 20
+)
+
+// RequestTelemetry derives per-call audit telemetry from an inbound HTTP
+// request: the request path (path only — the query string never leaves the
+// process) and the HTTP method. When exactly one required scope is being
+// enforced it becomes ScopeUsed; with zero or multiple scopes, ScopeUsed is
+// omitted (it is never a joined list). Returns nil for a nil request.
+func RequestTelemetry(r *http.Request, requiredScopes ...string) *VerifyTelemetry {
+	if r == nil {
+		return nil
+	}
+	tel := &VerifyTelemetry{
+		Endpoint: r.URL.Path,
+		Method:   r.Method,
+	}
+	if len(requiredScopes) == 1 {
+		tel.ScopeUsed = requiredScopes[0]
+	}
+	return tel
+}
+
+// applyTelemetry sanitizes tel and copies it onto the verify request body.
+// Fields left empty after sanitization stay unset and are omitted from the
+// JSON entirely (omitempty) — never sent as null or "".
+func applyTelemetry(body *verifyRequest, tel *VerifyTelemetry) {
+	if tel == nil {
+		return
+	}
+	body.ScopeUsed = truncateRunes(tel.ScopeUsed, maxScopeUsedChars)
+	if endpoint := tel.Endpoint; endpoint != "" {
+		// Strip everything from the first "?" or "#": query strings and
+		// fragments can carry PII and must never reach the audit log.
+		if i := strings.IndexAny(endpoint, "?#"); i >= 0 {
+			endpoint = endpoint[:i]
+		}
+		body.Endpoint = truncateRunes(endpoint, maxEndpointChars)
+	}
+	body.Method = truncateRunes(strings.ToUpper(strings.TrimSpace(tel.Method)), maxMethodChars)
+}
+
+// truncateRunes returns s truncated to at most max runes.
+func truncateRunes(s string, max int) string {
+	if len(s) <= max {
+		return s // fast path: byte length bounds rune length
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max])
+}
+
+// activeErrorDenial maps an introspection response that reports active: true
+// AND a string error field to a denial. This is the single place the
+// active-error semantics live; middleware (net/http, gin, echo) only maps
+// the returned error codes to HTTP responses.
+//
+//   - insufficient_scope → ErrCodeInsufficientScopes with the hosted
+//     required_scope/granted_scopes when present (local context otherwise),
+//     so middleware writes the spec §6.4 step-up shape.
+//   - bound_exceeded → ErrCodeCallRefused with the hosted
+//     error_description/bound/renewal passed through verbatim.
+//   - any other error string → ErrCodeCallRefused with a generic
+//     description: forward-compatible fail-closed.
+func activeErrorDenial(info *TokenInfo, respBytes []byte, requiredScopes []string) *AgentAdmitError {
+	// Second lenient pass over the raw response for refusal-only fields not
+	// captured on TokenInfo. A malformed extra field must not soften the
+	// denial, so the unmarshal error is deliberately ignored.
+	var hosted struct {
+		RequiredScope    string          `json:"required_scope"`
+		GrantedScopes    []string        `json:"granted_scopes"`
+		ErrorDescription string          `json:"error_description"`
+		Bound            json.RawMessage `json:"bound"`
+		Renewal          json.RawMessage `json:"renewal"`
+	}
+	_ = json.Unmarshal(respBytes, &hosted)
+
+	switch info.Error {
+	case VerifyErrorInsufficientScope:
+		scopeErr := newError(ErrCodeInsufficientScopes,
+			"call refused by the authorization service: insufficient_scope", nil)
+		if hosted.RequiredScope != "" {
+			scopeErr.RequiredScopes = []string{hosted.RequiredScope}
+		} else {
+			scopeErr.RequiredScopes = requiredScopes
+		}
+		if hosted.GrantedScopes != nil {
+			scopeErr.GrantedScopes = hosted.GrantedScopes
+		} else {
+			scopeErr.GrantedScopes = info.Scopes
+		}
+		return scopeErr
+
+	case VerifyErrorBoundExceeded:
+		refusal := newError(ErrCodeCallRefused,
+			"call refused by the authorization service: bound_exceeded", nil)
+		refusal.VerifyError = VerifyErrorBoundExceeded
+		refusal.ErrorDescription = hosted.ErrorDescription
+		refusal.Bound = hosted.Bound
+		refusal.Renewal = hosted.Renewal
+		return refusal
+
+	default:
+		refusal := newError(ErrCodeCallRefused,
+			"call refused by the authorization service: "+info.Error, nil)
+		refusal.VerifyError = info.Error
+		refusal.ErrorDescription = "Call refused by the authorization service."
+		return refusal
+	}
 }
 
 // ---------------------------------------------------------------------------
