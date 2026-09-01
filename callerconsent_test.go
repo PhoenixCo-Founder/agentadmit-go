@@ -123,7 +123,9 @@ func TestClassifyCaller_HonorsNonAgentClassifier(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCallerConsent_ExternalAllowsWithScope(t *testing.T) {
+	var verifyBody map[string]interface{}
 	client := newCallerConsentClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&verifyBody)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(activeGrantedBody))
 	})
@@ -143,6 +145,12 @@ func TestCallerConsent_ExternalAllowsWithScope(t *testing.T) {
 
 	if !called.Load() {
 		t.Fatalf("next handler must run; status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if verifyBody["scope_used"] != "read:things" || verifyBody["consent_first"] != true {
+		t.Fatalf("caller-consent telemetry = %#v, want scope_used + consent_first", verifyBody)
+	}
+	if verifyBody["endpoint"] != "/api/records" || verifyBody["method"] != "GET" {
+		t.Fatalf("request telemetry = %#v, want path-only endpoint + method", verifyBody)
 	}
 }
 

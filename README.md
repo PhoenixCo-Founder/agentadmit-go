@@ -406,6 +406,10 @@ info, err := client.ValidateContextWithTelemetry(ctx, token, []string{"read:orde
 
 `agentadmit.RequestTelemetry(r, scopes...)` builds that struct from an inbound `*http.Request` with the same sanitization the middleware uses.
 
+`CallerConsentMiddleware` also declares its `RequiredScope` and sets the hosted
+consent-first guard automatically, so consent is resolved before any scope
+decision while allowed calls still receive exact per-call telemetry.
+
 This release also closes a fail-closed gap in verification: an introspection response that reports `active: true` together with an `error` field is a refusal of that specific call, never a pass-through. The middleware maps it to HTTP 403 — `insufficient_scope` produces the same step-up body as a local scope failure (`error`, `required_scope`, `granted_scopes`), `bound_exceeded` passes the hosted `error_description`/`bound`/`renewal` fields through so the agent can relay a precise renewal request, and any unknown refusal code fails closed with a generic description. Direct callers see this as an `AgentAdmitError` with code `ErrCodeCallRefused` (or `ErrCodeInsufficientScopes` for scope refusals); use `agentadmit.IsCallRefused(err)` to detect it.
 
 ## Context Support
