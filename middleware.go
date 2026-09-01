@@ -43,7 +43,8 @@ func (c *Client) Middleware(requiredScopes ...string) func(http.Handler) http.Ha
 				return
 			}
 
-			info, err := c.ValidateContext(r.Context(), token, requiredScopes)
+			info, err := c.ValidateContextWithTelemetry(r.Context(), token, requiredScopes,
+				RequestTelemetry(r, requiredScopes...))
 			if err != nil {
 				writeMiddlewareError(w, err)
 				return
@@ -72,7 +73,8 @@ func (c *Client) RequireAgentMiddleware(requiredScopes ...string) func(http.Hand
 				return
 			}
 
-			info, err := c.ValidateContext(r.Context(), token, requiredScopes)
+			info, err := c.ValidateContextWithTelemetry(r.Context(), token, requiredScopes,
+				RequestTelemetry(r, requiredScopes...))
 			if err != nil {
 				writeMiddlewareError(w, err)
 				return
@@ -98,6 +100,9 @@ func writeMiddlewareError(w http.ResponseWriter, err error) {
 		case ErrCodeInsufficientScopes:
 			w.WriteHeader(http.StatusForbidden)
 			w.Write(insufficientScopeBody(aaErr))
+		case ErrCodeCallRefused:
+			w.WriteHeader(http.StatusForbidden)
+			w.Write(callRefusedBody(aaErr))
 		case ErrCodeServiceUnavailable:
 			w.WriteHeader(http.StatusServiceUnavailable)
 			w.Write([]byte(`{"error":"service_unavailable","message":"AgentAdmit service unavailable"}`))
@@ -139,6 +144,39 @@ func insufficientScopeBody(aaErr *AgentAdmitError) []byte {
 	b, err := json.Marshal(body)
 	if err != nil {
 		return []byte(`{"error":"insufficient_scope","message":"Token lacks required scopes"}`)
+	}
+	return b
+}
+
+// CallRefusedPayload builds the 403 response body for an active-response
+// refusal (Code == ErrCodeCallRefused). For a bound_exceeded refusal the
+// hosted error_description/bound/renewal fields are passed through verbatim;
+// for unknown refusal codes the body is the generic fail-closed shape
+// {error, error_description}. Exported so the gin and echo adapters share
+// the exact same body semantics as the net/http middleware.
+func CallRefusedPayload(aaErr *AgentAdmitError) map[string]interface{} {
+	code := aaErr.VerifyError
+	if code == "" {
+		code = string(ErrCodeCallRefused)
+	}
+	payload := map[string]interface{}{"error": code}
+	if aaErr.ErrorDescription != "" {
+		payload["error_description"] = aaErr.ErrorDescription
+	}
+	if len(aaErr.Bound) > 0 {
+		payload["bound"] = aaErr.Bound
+	}
+	if len(aaErr.Renewal) > 0 {
+		payload["renewal"] = aaErr.Renewal
+	}
+	return payload
+}
+
+// callRefusedBody marshals CallRefusedPayload for the net/http middleware.
+func callRefusedBody(aaErr *AgentAdmitError) []byte {
+	b, err := json.Marshal(CallRefusedPayload(aaErr))
+	if err != nil {
+		return []byte(`{"error":"call_refused","error_description":"Call refused by the authorization service."}`)
 	}
 	return b
 }

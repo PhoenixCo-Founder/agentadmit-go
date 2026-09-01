@@ -1,6 +1,7 @@
 package agentadmit
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 )
@@ -28,6 +29,14 @@ const (
 	// ErrCodeRateLimit is returned when the AgentAdmit introspection endpoint
 	// returns HTTP 429 and all retry attempts are exhausted.
 	ErrCodeRateLimit ErrorCode = "rate_limit_exceeded"
+
+	// ErrCodeCallRefused is returned when the introspection response reports
+	// active: true but ALSO carries an error field — the hosted service is
+	// refusing this specific call (e.g. bound_exceeded on a bounded
+	// capability). This is always a denial, never a pass-through; middleware
+	// maps it to HTTP 403. Note: an active insufficient_scope refusal maps
+	// to ErrCodeInsufficientScopes instead, so the step-up shape is uniform.
+	ErrCodeCallRefused ErrorCode = "call_refused"
 )
 
 // AgentAdmitError is the structured error type returned by all SDK methods.
@@ -61,6 +70,25 @@ type AgentAdmitError struct {
 
 	// GrantedScopes lists the scopes the token actually carries, when known.
 	GrantedScopes []string
+
+	// VerifyError is the hosted error code carried on an active-but-refused
+	// introspection response (e.g. "bound_exceeded"). Populated when Code is
+	// ErrCodeCallRefused.
+	VerifyError string
+
+	// ErrorDescription is the human-readable refusal description. For a
+	// bound_exceeded refusal it is the hosted service's description passed
+	// through verbatim; for unknown refusal codes it is a generic
+	// fail-closed message. Populated when Code is ErrCodeCallRefused.
+	ErrorDescription string
+
+	// Bound is the hosted "bound" object from a bound_exceeded refusal,
+	// passed through verbatim. Nil otherwise.
+	Bound json.RawMessage
+
+	// Renewal is the hosted "renewal" object from a bound_exceeded refusal,
+	// passed through verbatim. Nil otherwise.
+	Renewal json.RawMessage
 }
 
 // Error implements the error interface.
@@ -96,6 +124,14 @@ func IsInvalidToken(err error) bool {
 func IsInsufficientScopes(err error) bool {
 	var aaErr *AgentAdmitError
 	return errors.As(err, &aaErr) && aaErr.Code == ErrCodeInsufficientScopes
+}
+
+// IsCallRefused returns true if err represents an active-response refusal
+// (the token is active but the hosted service refused this specific call,
+// e.g. a bounded capability's bound is exhausted).
+func IsCallRefused(err error) bool {
+	var aaErr *AgentAdmitError
+	return errors.As(err, &aaErr) && aaErr.Code == ErrCodeCallRefused
 }
 
 // IsServiceUnavailable returns true if err represents a failure to reach

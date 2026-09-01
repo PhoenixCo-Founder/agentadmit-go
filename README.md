@@ -387,6 +387,27 @@ The SDK sends it as `presence: {verified: true, uv: true, method, verified_at}` 
 
 Honesty ceiling: this is your app's attestation, recorded and provenance-marked. It is not witnessed by AgentAdmit and not independently verifiable. Only attest a ceremony that verified the user with UV (biometric or PIN user verification); a ceremony without UV carries no presence fact, so leave `Presence` nil. An out-of-contract `Method` or a zero `VerifiedAt` fails client-side before any HTTP call.
 
+## Per-Call Audit Telemetry
+
+Every verified call can report the scope it exercised, the endpoint it hit, and the HTTP method to the app's tamper-evident audit log on the hosted service. The middleware in this package and the `gin`/`echo` subpackages does this automatically: the introspection request carries `scope_used` (the single scope the middleware is enforcing for that call), `endpoint` (the request path only — the query string is stripped before it leaves your process, since queries can carry PII), and `method` (uppercased). Each field is sent when known and omitted when not; when omitted, the audit row honestly records "not reported". Nothing new is required from you — upgrading the SDK is the whole change.
+
+`scope_used` is only sent when the middleware enforces exactly one scope. With zero or multiple required scopes it is omitted entirely — it is never a joined list. Endpoint and method are still sent in that case. The SDK caps the fields client-side to the hosted contract: 120 characters for the scope, 500 for the path, 20 for the method.
+
+Calling `Validate` directly (outside middleware) sends no telemetry by default. To report it from your own call sites, use the telemetry variants:
+
+```go
+info, err := client.ValidateContextWithTelemetry(ctx, token, []string{"read:orders"},
+    &agentadmit.VerifyTelemetry{
+        ScopeUsed: "read:orders", // the single scope this call enforces
+        Endpoint:  r.URL.Path,    // path only; the SDK strips any query string
+        Method:    r.Method,      // uppercased by the SDK
+    })
+```
+
+`agentadmit.RequestTelemetry(r, scopes...)` builds that struct from an inbound `*http.Request` with the same sanitization the middleware uses.
+
+This release also closes a fail-closed gap in verification: an introspection response that reports `active: true` together with an `error` field is a refusal of that specific call, never a pass-through. The middleware maps it to HTTP 403 — `insufficient_scope` produces the same step-up body as a local scope failure (`error`, `required_scope`, `granted_scopes`), `bound_exceeded` passes the hosted `error_description`/`bound`/`renewal` fields through so the agent can relay a precise renewal request, and any unknown refusal code fails closed with a generic description. Direct callers see this as an `AgentAdmitError` with code `ErrCodeCallRefused` (or `ErrCodeInsufficientScopes` for scope refusals); use `agentadmit.IsCallRefused(err)` to detect it.
+
 ## Context Support
 
 All SDK methods accept a `context.Context` for graceful cancellation and deadline propagation:

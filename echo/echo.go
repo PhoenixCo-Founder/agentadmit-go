@@ -46,7 +46,8 @@ func Middleware(client *agentadmit.Client, requiredScopes ...string) echo.Middle
 				return next(c)
 			}
 
-			info, err := client.ValidateContext(c.Request().Context(), token, requiredScopes)
+			info, err := client.ValidateContextWithTelemetry(c.Request().Context(), token, requiredScopes,
+				agentadmit.RequestTelemetry(c.Request(), requiredScopes...))
 			if err != nil {
 				return toEchoError(err)
 			}
@@ -70,7 +71,8 @@ func RequireAgent(client *agentadmit.Client, requiredScopes ...string) echo.Midd
 				})
 			}
 
-			info, err := client.ValidateContext(c.Request().Context(), token, requiredScopes)
+			info, err := client.ValidateContextWithTelemetry(c.Request().Context(), token, requiredScopes,
+				agentadmit.RequestTelemetry(c.Request(), requiredScopes...))
 			if err != nil {
 				return toEchoError(err)
 			}
@@ -125,6 +127,10 @@ func toEchoError(err error) error {
 			})
 		case agentadmit.ErrCodeInsufficientScopes:
 			return echo.NewHTTPError(http.StatusForbidden, insufficientScopePayload(aaErr))
+		case agentadmit.ErrCodeCallRefused:
+			// Active-response refusal (e.g. bound_exceeded): the semantics and
+			// body shape live in the core package.
+			return echo.NewHTTPError(http.StatusForbidden, agentadmit.CallRefusedPayload(aaErr))
 		case agentadmit.ErrCodeServiceUnavailable:
 			return echo.NewHTTPError(http.StatusServiceUnavailable, map[string]string{
 				"error": "service_unavailable", "message": "AgentAdmit service unavailable",

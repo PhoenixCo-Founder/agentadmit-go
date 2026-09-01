@@ -45,7 +45,8 @@ func Middleware(client *agentadmit.Client, requiredScopes ...string) gin.Handler
 			return
 		}
 
-		info, err := client.ValidateContext(c.Request.Context(), token, requiredScopes)
+		info, err := client.ValidateContextWithTelemetry(c.Request.Context(), token, requiredScopes,
+			agentadmit.RequestTelemetry(c.Request, requiredScopes...))
 		if err != nil {
 			abortWithError(c, err)
 			return
@@ -69,7 +70,8 @@ func RequireAgent(client *agentadmit.Client, requiredScopes ...string) gin.Handl
 			return
 		}
 
-		info, err := client.ValidateContext(c.Request.Context(), token, requiredScopes)
+		info, err := client.ValidateContextWithTelemetry(c.Request.Context(), token, requiredScopes,
+			agentadmit.RequestTelemetry(c.Request, requiredScopes...))
 		if err != nil {
 			abortWithError(c, err)
 			return
@@ -99,6 +101,10 @@ func abortWithError(c *gin.Context, err error) {
 			c.AbortWithStatusJSON(401, gin.H{"error": "invalid_token", "message": "Token is invalid or revoked"})
 		case agentadmit.ErrCodeInsufficientScopes:
 			c.AbortWithStatusJSON(403, insufficientScopePayload(aaErr))
+		case agentadmit.ErrCodeCallRefused:
+			// Active-response refusal (e.g. bound_exceeded): the semantics and
+			// body shape live in the core package.
+			c.AbortWithStatusJSON(403, agentadmit.CallRefusedPayload(aaErr))
 		case agentadmit.ErrCodeServiceUnavailable:
 			c.AbortWithStatusJSON(503, gin.H{"error": "service_unavailable", "message": "AgentAdmit service unavailable"})
 		default:
