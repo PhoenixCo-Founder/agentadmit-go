@@ -59,6 +59,13 @@ const (
 	// call bound) is exhausted for this call. The SDK treats any error
 	// on an active response as a denial — see ErrCodeCallRefused.
 	VerifyErrorBoundExceeded = "bound_exceeded"
+
+	// VerifyErrorConfirmationRequired is returned by the hosted service on an
+	// active token whose exercised scope is confirm_each_time: the grant
+	// stands, but THIS call needs a fresh human confirmation. The response
+	// carries the staged ceremony — see ActionConfirmation and
+	// ConfirmationRequiredError.
+	VerifyErrorConfirmationRequired = "confirmation_required"
 )
 
 // TokenInfo contains validated token metadata returned by AgentAdmit
@@ -122,6 +129,13 @@ type TokenInfo struct {
 	// Presence is the human-presence fact for the connection (WebAuthn
 	// step-up). Additive; nil when the platform did not return one.
 	Presence *Presence `json:"presence,omitempty"`
+
+	// ActionConfirmation names the confirm-each-time ceremony the hosted
+	// service consumed to accept THIS call. Additive; nil unless the
+	// response strictly reported a string action_session_id with
+	// consumed: true. Use it as your own transaction step-up instead of
+	// asking the human twice. See ActionConfirmationFromContext.
+	ActionConfirmation *ActionConfirmationConsumed `json:"action_confirmation,omitempty"`
 }
 
 // ValidationResult is the full response envelope from the AgentAdmit
@@ -143,6 +157,12 @@ type verifyRequest struct {
 	Endpoint     string   `json:"endpoint,omitempty"`
 	Method       string   `json:"method,omitempty"`
 	ConsentFirst bool     `json:"consent_first,omitempty"`
+
+	// Confirm-each-time (1.11.0): the agent's attestation on its retry, the
+	// request-body digest, and the app's plain-language action summary.
+	ActionAttestationID string `json:"action_attestation_id,omitempty"`
+	RequestDigest       string `json:"request_digest,omitempty"`
+	ActionSummary       string `json:"action_summary,omitempty"`
 }
 
 // VerifyTelemetry carries optional per-call audit fields sent with the
@@ -170,6 +190,23 @@ type VerifyTelemetry struct {
 	// before evaluating ScopeUsed. CallerConsentMiddleware sets this
 	// automatically so denied classes cannot learn scope state.
 	ConsentFirst bool
+
+	// ActionAttestationID is the single-use attestation id from a completed
+	// hosted confirm-each-time ceremony, which the agent presents on its
+	// retry via the X-AgentAdmit-Action-Attestation header. Middleware
+	// forwards it automatically (RequestTelemetry reads the header); it is
+	// trimmed and capped at 120 characters.
+	ActionAttestationID string
+
+	// RequestDigest is "sha256:<hex>" over the raw request body, so a
+	// confirmation covers the exact payload and not merely the route.
+	// Capped at 128 characters; build it with RequestDigest.
+	RequestDigest string
+
+	// ActionSummary is the app-supplied plain-language description of the
+	// action shown to the human on the hosted confirmation page and
+	// committed into the signature. Trimmed and capped at 200 characters.
+	ActionSummary string
 }
 
 // contextKey is the unexported type used to store TokenInfo in a

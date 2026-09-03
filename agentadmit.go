@@ -88,9 +88,26 @@ func New(cfg Config) (*Client, error) {
 		return nil, newError(ErrCodeConfig, "APIKey must start with 'aa_test_' or 'aa_live_'", nil)
 	}
 
+	apiURLStr := cfg.APIURL
+	if apiURLStr == "" {
+		apiURLStr = DefaultAPIURL
+	}
+	if err := requireHTTPS(apiURLStr, "APIURL"); err != nil {
+		return nil, err
+	}
+
+	// One hosted-service origin, not two. An operator who points APIURL
+	// somewhere else (staging, a local rig) and leaves VerifyURL unset
+	// expects verify to follow — otherwise management calls go to one
+	// service while every per-call verify silently goes to production
+	// (caught on the TrainerTracer dogfood rig, Sep 3, 2026). An explicitly
+	// set VerifyURL always wins.
 	verifyURL := cfg.VerifyURL
 	if verifyURL == "" {
 		verifyURL = DefaultVerifyURL
+		if base := strings.TrimRight(apiURLStr, "/"); base != strings.TrimRight(DefaultAPIURL, "/") {
+			verifyURL = base + "/api/v1/verify"
+		}
 	}
 	if err := requireHTTPS(verifyURL, "VerifyURL"); err != nil {
 		return nil, err
@@ -104,14 +121,6 @@ func New(cfg Config) (*Client, error) {
 	maxRetries := cfg.MaxRetries
 	if maxRetries == 0 {
 		maxRetries = DefaultMaxRetries
-	}
-
-	apiURLStr := cfg.APIURL
-	if apiURLStr == "" {
-		apiURLStr = DefaultAPIURL
-	}
-	if err := requireHTTPS(apiURLStr, "APIURL"); err != nil {
-		return nil, err
 	}
 
 	return &Client{
@@ -300,7 +309,14 @@ func (c *Client) ValidateContextWithTelemetry(ctx context.Context, token string,
 		// (e.g. bound_exceeded on bounded capabilities); honoring only
 		// `active` would allow refused calls through.
 		if info.Error != "" {
-			return nil, activeErrorDenial(info, respBytes, requiredScopes)
+			denial := activeErrorDenial(info, respBytes, requiredScopes)
+			// Confirm-each-time: when the hosted service staged a ceremony
+			// for this exact action, type the refusal so a custom gate can
+			// relay the link. A malformed block stays a plain refusal.
+			if denial.Confirmation != nil {
+				return nil, &ConfirmationRequiredError{AgentAdmitError: denial}
+			}
+			return nil, denial
 		}
 
 		// Scope enforcement (AgentAdmit also enforces server-side, but this gives
@@ -342,8 +358,9 @@ func decodeVerifyResponse(data []byte) (*TokenInfo, error) {
 	// populated during this pass.
 	var envelope struct {
 		TokenInfo
-		RawConsent  json.RawMessage `json:"consent"`
-		RawPresence json.RawMessage `json:"presence"`
+		RawConsent            json.RawMessage `json:"consent"`
+		RawPresence           json.RawMessage `json:"presence"`
+		RawActionConfirmation json.RawMessage `json:"action_confirmation"`
 	}
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return nil, err
@@ -368,6 +385,10 @@ func decodeVerifyResponse(data []byte) (*TokenInfo, error) {
 		// On unmarshal failure the malformed presence block is dropped and
 		// verification proceeds without a presence fact (not verified).
 	}
+	// Confirm-each-time (1.11.0): only a strict {string id, consumed: true}
+	// block reaches the context; anything else is absent, never a claim that
+	// a human confirmed.
+	info.ActionConfirmation = parseActionConfirmationConsumed(envelope.RawActionConfirmation)
 	return &info, nil
 }
 
@@ -387,13 +408,18 @@ const (
 // process) and the HTTP method. When exactly one required scope is being
 // enforced it becomes ScopeUsed; with zero or multiple scopes, ScopeUsed is
 // omitted (it is never a joined list). Returns nil for a nil request.
+//
+// The agent's X-AgentAdmit-Action-Attestation header is always forwarded when
+// present, so a confirm-each-time retry is accepted on any route. The body
+// digest and action summary ride RequestTelemetryWithOptions instead.
 func RequestTelemetry(r *http.Request, requiredScopes ...string) *VerifyTelemetry {
 	if r == nil {
 		return nil
 	}
 	tel := &VerifyTelemetry{
-		Endpoint: r.URL.Path,
-		Method:   r.Method,
+		Endpoint:            r.URL.Path,
+		Method:              r.Method,
+		ActionAttestationID: ActionAttestation(r),
 	}
 	if len(requiredScopes) == 1 {
 		tel.ScopeUsed = requiredScopes[0]
@@ -419,6 +445,10 @@ func applyTelemetry(body *verifyRequest, tel *VerifyTelemetry) {
 	}
 	body.Method = truncateRunes(strings.ToUpper(strings.TrimSpace(tel.Method)), maxMethodChars)
 	body.ConsentFirst = tel.ConsentFirst
+	// Confirm-each-time fields: trimmed, capped, omitted when empty.
+	body.ActionAttestationID = truncateRunes(strings.TrimSpace(tel.ActionAttestationID), maxActionAttestationChars)
+	body.RequestDigest = truncateRunes(strings.TrimSpace(tel.RequestDigest), maxRequestDigestChars)
+	body.ActionSummary = truncateRunes(strings.TrimSpace(tel.ActionSummary), maxActionSummaryChars)
 }
 
 // truncateRunes returns s truncated to at most max runes.
@@ -443,6 +473,11 @@ func truncateRunes(s string, max int) string {
 //     so middleware writes the spec §6.4 step-up shape.
 //   - bound_exceeded → ErrCodeCallRefused with the hosted
 //     error_description/bound/renewal passed through verbatim.
+//   - confirmation_required → ErrCodeCallRefused carrying the staged
+//     confirm-each-time ceremony (strictly parsed) plus any
+//     attestation_status/attestation_description, so the agent can hand the
+//     link to the human and retry. A malformed ceremony is dropped and the
+//     refusal stands with no link.
 //   - any other error string → ErrCodeCallRefused with a generic
 //     description: forward-compatible fail-closed.
 func activeErrorDenial(info *TokenInfo, respBytes []byte, requiredScopes []string) *AgentAdmitError {
@@ -481,6 +516,32 @@ func activeErrorDenial(info *TokenInfo, respBytes []byte, requiredScopes []strin
 		refusal.ErrorDescription = hosted.ErrorDescription
 		refusal.Bound = hosted.Bound
 		refusal.Renewal = hosted.Renewal
+		return refusal
+
+	case VerifyErrorConfirmationRequired:
+		// Third pass, key by key: a type-malformed sibling field (say a
+		// numeric attestation_status) must not cost the agent the
+		// confirmation link, and the ceremony itself is parsed strictly.
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(respBytes, &fields)
+
+		refusal := newError(ErrCodeCallRefused,
+			"call refused by the authorization service: confirmation_required", nil)
+		refusal.VerifyError = VerifyErrorConfirmationRequired
+		refusal.ErrorDescription = confirmationRequiredDescription
+		if description, ok := rawString(fields["error_description"]); ok && description != "" {
+			refusal.ErrorDescription = description
+		}
+		refusal.Confirmation = parseActionConfirmation(fields["confirmation"])
+		if status, ok := rawString(fields["attestation_status"]); ok {
+			refusal.AttestationStatus = status
+		}
+		if description, ok := rawString(fields["attestation_description"]); ok {
+			refusal.AttestationDescription = description
+		}
+		if renewal := fields["renewal"]; len(renewal) > 0 && string(renewal) != "null" {
+			refusal.Renewal = renewal
+		}
 		return refusal
 
 	default:

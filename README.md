@@ -447,6 +447,46 @@ Every agent request triggers a call to AgentAdmit's introspection API. Latency i
 | [`examples/gin/`](examples/gin/) | Gin framework with route-level and group middleware |
 | [`examples/mcp-server/`](examples/mcp-server/) | Complete MCP server with JSON-RPC, multiple tools, and token-per-call auth |
 
+## Confirm Each Time (Exercise-Time Human Confirmation)
+
+Some actions should never run on a standing grant alone: moving money,
+sending or publishing on the user's behalf, deleting data, or touching
+production. Mark those scopes `confirm_each_time: true` when you register
+them. Every call that exercises one then requires a fresh human confirmation.
+
+```go
+pay := client.MiddlewareWithOptions(agentadmit.ScopeOptions{
+    ActionSummary: func(r *http.Request, body []byte) string {
+        return "Pay Alex $50"
+    },
+}, "write:payments")(payHandler)
+```
+
+The first call is refused with HTTP 403 and a `confirmation_required` body.
+The agent gives `confirmation.action_session_url` to the human. After the
+human confirms on AgentAdmit's hosted page with their passkey, the agent
+retries the same request with:
+
+```http
+X-AgentAdmit-Action-Attestation: asess_abc
+```
+
+The SDK always forwards that header. A route configured with
+`ActionSummary` also sends a `sha256:` digest of the raw request body and the
+plain-language summary, while restoring the body for the handler. The hosted
+signature commits to the scope, method, endpoint, digest, and summary; a
+different retry is refused. The summary is supplied by your app: AgentAdmit
+proves what the human saw but does not verify the description against the
+request.
+
+The standard net/http, Gin, and Echo adapters expose matching
+`*WithOptions` middleware. Custom gates can match
+`*agentadmit.ConfirmationRequiredError`; malformed ceremony blocks remain
+generic fail-closed refusals with no link. On an accepted retry,
+`ActionConfirmationFromContext`, `aggin.GetActionConfirmation`, and
+`agecho.GetActionConfirmation` expose the strictly parsed consumed ceremony,
+so an app can avoid asking the human twice.
+
 ## Rate Limiting
 
 The AgentAdmit introspection endpoint enforces rate limits. The Go SDK handles HTTP 429 responses **automatically** with exponential backoff and jitter - no changes needed in your handler or middleware code.
