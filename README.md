@@ -5,6 +5,8 @@ User-mediated AI agent authorization for Go apps. Supports **net/http**, **Gin**
 > **Get started:** Sign up at [agentadmit.com](https://agentadmit.com) → Get your test keys → Install the SDK → Build.
 > Test keys are available immediately after signup. Live keys become available when you subscribe an app.
 
+> **Where the consent step runs (live keys).** The agent grant is approved on the AgentAdmit **hosted consent page**, opened on your app's behalf: your backend creates a consent session (`POST /api/v1/apps/{app_id}/consent-sessions`) with your live key and sends the signed-in user to the returned `session_url`. Scope selection, duration, intent, existing-grant review, the passkey ceremony, and the one-time token all happen there. **Direct token issuance (`POST /api/v1/apps/{app_id}/token`, and this SDK's issue-token helpers and any SDK-mounted `generate-token` route) is a sandbox facility for `aa_test_` keys only; a live key receives `403 hosted_consent_required`.** Verification (`/verify`) is unchanged and is the core of this SDK. Full walkthrough: [App Owner Guide, Step 4](https://agentadmit.com/docs/app-owner-guide).
+
 ## Installation
 
 ```bash
@@ -30,7 +32,7 @@ if err != nil {
 
 ## How It Works
 
-1. **User generates a token** in your app's Agent Access page (powered by the AgentAdmit React SDK)
+1. **User approves the grant on the AgentAdmit hosted consent page**, opened from your app's Agent Access page (your backend creates the consent session)
 2. **User gives the token to their AI agent** - the token goes to the human, not the agent. No automated delivery = no prompt injection surface.
 3. **Agent presents the token** on each API request via `Authorization: Bearer ag_at_...`
 4. **Your backend validates via AgentAdmit** - one SDK call enforces scopes, logs the request, and keeps access revocable
