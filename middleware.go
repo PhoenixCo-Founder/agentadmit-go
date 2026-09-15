@@ -34,6 +34,30 @@ import (
 //	    client.Middleware("read:workouts")(yourHandler),
 //	)
 func (c *Client) Middleware(requiredScopes ...string) func(http.Handler) http.Handler {
+	return c.MiddlewareWithOptions(ScopeOptions{}, requiredScopes...)
+}
+
+// MiddlewareWithOptions is Middleware plus confirm-each-time options.
+//
+// With opts.ActionSummary set, the middleware describes THIS action for the
+// human and sends a sha256 digest of the raw request body with the verify
+// call, so the hosted service can stage (and later match) a confirmation for
+// exactly this action. The body is re-buffered, so the handler still reads it
+// in full. When the hosted service refuses with confirmation_required the
+// handler is never invoked and the agent receives 403 with the confirmation
+// link; the agent's retry carrying X-AgentAdmit-Action-Attestation is
+// forwarded automatically (that header is forwarded on every route, with or
+// without options).
+//
+//	mux.Handle("/api/payments", client.MiddlewareWithOptions(
+//	    agentadmit.ScopeOptions{
+//	        ActionSummary: func(r *http.Request, body []byte) string {
+//	            return "Pay Alex $50"
+//	        },
+//	    },
+//	    "write:payments",
+//	)(payHandler))
+func (c *Client) MiddlewareWithOptions(opts ScopeOptions, requiredScopes ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := bearerToken(r)
@@ -44,7 +68,7 @@ func (c *Client) Middleware(requiredScopes ...string) func(http.Handler) http.Ha
 			}
 
 			info, err := c.ValidateContextWithTelemetry(r.Context(), token, requiredScopes,
-				RequestTelemetry(r, requiredScopes...))
+				RequestTelemetryWithOptions(r, opts, requiredScopes...))
 			if err != nil {
 				writeMiddlewareError(w, err)
 				return
@@ -64,6 +88,12 @@ func (c *Client) Middleware(requiredScopes ...string) func(http.Handler) http.Ha
 // Use this for endpoints that should ONLY be accessible by AI agents, not
 // regular users.
 func (c *Client) RequireAgentMiddleware(requiredScopes ...string) func(http.Handler) http.Handler {
+	return c.RequireAgentMiddlewareWithOptions(ScopeOptions{}, requiredScopes...)
+}
+
+// RequireAgentMiddlewareWithOptions is RequireAgentMiddleware plus
+// confirm-each-time options. See MiddlewareWithOptions for the semantics.
+func (c *Client) RequireAgentMiddlewareWithOptions(opts ScopeOptions, requiredScopes ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := bearerToken(r)
@@ -74,7 +104,7 @@ func (c *Client) RequireAgentMiddleware(requiredScopes ...string) func(http.Hand
 			}
 
 			info, err := c.ValidateContextWithTelemetry(r.Context(), token, requiredScopes,
-				RequestTelemetry(r, requiredScopes...))
+				RequestTelemetryWithOptions(r, opts, requiredScopes...))
 			if err != nil {
 				writeMiddlewareError(w, err)
 				return
@@ -151,6 +181,9 @@ func insufficientScopeBody(aaErr *AgentAdmitError) []byte {
 // CallRefusedPayload builds the 403 response body for an active-response
 // refusal (Code == ErrCodeCallRefused). For a bound_exceeded refusal the
 // hosted error_description/bound/renewal fields are passed through verbatim;
+// for a confirmation_required refusal it carries the strictly typed
+// confirmation block (plus attestation_status/attestation_description when
+// present) so the agent can hand the link to the human;
 // for unknown refusal codes the body is the generic fail-closed shape
 // {error, error_description}. Exported so the gin and echo adapters share
 // the exact same body semantics as the net/http middleware.
@@ -165,6 +198,17 @@ func CallRefusedPayload(aaErr *AgentAdmitError) map[string]interface{} {
 	}
 	if len(aaErr.Bound) > 0 {
 		payload["bound"] = aaErr.Bound
+	}
+	// Confirm-each-time: the staged ceremony the agent needs to get a human
+	// to complete, plus why a presented attestation was not accepted.
+	if aaErr.Confirmation != nil {
+		payload["confirmation"] = aaErr.Confirmation
+	}
+	if aaErr.AttestationStatus != "" {
+		payload["attestation_status"] = aaErr.AttestationStatus
+	}
+	if aaErr.AttestationDescription != "" {
+		payload["attestation_description"] = aaErr.AttestationDescription
 	}
 	if len(aaErr.Renewal) > 0 {
 		payload["renewal"] = aaErr.Renewal

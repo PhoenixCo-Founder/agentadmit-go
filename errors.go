@@ -86,9 +86,24 @@ type AgentAdmitError struct {
 	// passed through verbatim. Nil otherwise.
 	Bound json.RawMessage
 
-	// Renewal is the hosted "renewal" object from a bound_exceeded refusal,
-	// passed through verbatim. Nil otherwise.
+	// Renewal is the hosted "renewal" object from a bound_exceeded or
+	// confirmation_required refusal, passed through verbatim. Nil otherwise.
 	Renewal json.RawMessage
+
+	// Confirmation is the confirm-each-time ceremony the hosted service
+	// staged for exactly this action, on a confirmation_required refusal.
+	// Nil when there was none or the wire block did not parse strictly (the
+	// refusal then fails closed with no link). See ConfirmationRequiredError.
+	Confirmation *ActionConfirmation
+
+	// AttestationStatus explains why an attestation the agent presented was
+	// not accepted — e.g. already_consumed, action_mismatch, expired,
+	// not_confirmed. Empty when none was presented.
+	AttestationStatus string
+
+	// AttestationDescription is the hosted human-readable companion to
+	// AttestationStatus. Empty when absent.
+	AttestationDescription string
 }
 
 // Error implements the error interface.

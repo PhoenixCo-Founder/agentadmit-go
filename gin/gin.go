@@ -38,6 +38,19 @@ const TokenInfoKey = "agentadmit_token"
 // If no Authorization header is present, the request passes through
 // unchanged, allowing regular user requests to work alongside agent requests.
 func Middleware(client *agentadmit.Client, requiredScopes ...string) gin.HandlerFunc {
+	return MiddlewareWithOptions(client, agentadmit.ScopeOptions{}, requiredScopes...)
+}
+
+// MiddlewareWithOptions is Middleware plus confirm-each-time options.
+//
+// With opts.ActionSummary set, the verify call carries the plain-language
+// description of THIS action and a sha256 digest of the raw request body
+// (re-buffered, so c.ShouldBindJSON still works downstream). A
+// confirmation_required refusal aborts with the same 403 body as the
+// net/http middleware, carrying the confirmation link. The agent's
+// X-AgentAdmit-Action-Attestation header is forwarded on every route, with
+// or without options.
+func MiddlewareWithOptions(client *agentadmit.Client, opts agentadmit.ScopeOptions, requiredScopes ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := bearerToken(c)
 		if token == "" {
@@ -46,7 +59,7 @@ func Middleware(client *agentadmit.Client, requiredScopes ...string) gin.Handler
 		}
 
 		info, err := client.ValidateContextWithTelemetry(c.Request.Context(), token, requiredScopes,
-			agentadmit.RequestTelemetry(c.Request, requiredScopes...))
+			agentadmit.RequestTelemetryWithOptions(c.Request, opts, requiredScopes...))
 		if err != nil {
 			abortWithError(c, err)
 			return
@@ -60,6 +73,12 @@ func Middleware(client *agentadmit.Client, requiredScopes ...string) gin.Handler
 // RequireAgent returns a Gin HandlerFunc that REQUIRES a valid AgentAdmit
 // token. Requests without a Bearer token are rejected with 401.
 func RequireAgent(client *agentadmit.Client, requiredScopes ...string) gin.HandlerFunc {
+	return RequireAgentWithOptions(client, agentadmit.ScopeOptions{}, requiredScopes...)
+}
+
+// RequireAgentWithOptions is RequireAgent plus confirm-each-time options.
+// See MiddlewareWithOptions for the semantics.
+func RequireAgentWithOptions(client *agentadmit.Client, opts agentadmit.ScopeOptions, requiredScopes ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := bearerToken(c)
 		if token == "" {
@@ -71,7 +90,7 @@ func RequireAgent(client *agentadmit.Client, requiredScopes ...string) gin.Handl
 		}
 
 		info, err := client.ValidateContextWithTelemetry(c.Request.Context(), token, requiredScopes,
-			agentadmit.RequestTelemetry(c.Request, requiredScopes...))
+			agentadmit.RequestTelemetryWithOptions(c.Request, opts, requiredScopes...))
 		if err != nil {
 			abortWithError(c, err)
 			return
@@ -80,6 +99,17 @@ func RequireAgent(client *agentadmit.Client, requiredScopes ...string) gin.Handl
 		c.Set(TokenInfoKey, info)
 		c.Next()
 	}
+}
+
+// GetActionConfirmation returns the confirm-each-time confirmation the hosted
+// service consumed to accept this call, or nil when this call did not consume
+// one. Apps running their own transaction step-up can treat it as that
+// confirmation instead of asking the human twice.
+func GetActionConfirmation(c *gin.Context) *agentadmit.ActionConfirmationConsumed {
+	if info := GetTokenInfo(c); info != nil {
+		return info.ActionConfirmation
+	}
+	return nil
 }
 
 // GetTokenInfo retrieves the validated *agentadmit.TokenInfo from the Gin

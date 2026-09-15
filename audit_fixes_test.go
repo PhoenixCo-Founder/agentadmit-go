@@ -305,7 +305,7 @@ func TestBearerToken_CaseInsensitive(t *testing.T) {
 		{"BeArEr mytoken", "mytoken"},
 		{"Basic dXNlcjpwYXNz", ""},
 		{"", ""},
-		{"Bearertoken", ""},  // no space -- not a valid Bearer scheme
+		{"Bearertoken", ""}, // no space -- not a valid Bearer scheme
 	}
 
 	for _, tc := range tests {

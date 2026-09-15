@@ -414,6 +414,88 @@ decision while allowed calls still receive exact per-call telemetry.
 
 This release also closes a fail-closed gap in verification: an introspection response that reports `active: true` together with an `error` field is a refusal of that specific call, never a pass-through. The middleware maps it to HTTP 403 — `insufficient_scope` produces the same step-up body as a local scope failure (`error`, `required_scope`, `granted_scopes`), `bound_exceeded` passes the hosted `error_description`/`bound`/`renewal` fields through so the agent can relay a precise renewal request, and any unknown refusal code fails closed with a generic description. Direct callers see this as an `AgentAdmitError` with code `ErrCodeCallRefused` (or `ErrCodeInsufficientScopes` for scope refusals); use `agentadmit.IsCallRefused(err)` to detect it.
 
+## Confirm Each Time (Exercise-Time Human Confirmation)
+
+Some actions should never run on a standing grant alone: moving money,
+sending or publishing on the user's behalf, deleting data, or touching
+production. Mark those scopes `confirm_each_time: true` when you register
+them. Every call that exercises one then requires a fresh human confirmation.
+
+```go
+pay := client.MiddlewareWithOptions(agentadmit.ScopeOptions{
+    ActionSummary: func(r *http.Request, body []byte) string {
+        return "Pay Alex $50"
+    },
+}, "write:payments")(payHandler)
+```
+
+The first call is refused with HTTP 403 and a `confirmation_required` body
+that carries the staged ceremony:
+
+```json
+{
+  "error": "confirmation_required",
+  "error_description": "This action requires a fresh human confirmation. ...",
+  "confirmation": {
+    "action_session_id": "asess_abc",
+    "action_session_url": "https://agentadmit.com/confirm/action/asess_abc",
+    "expires_at": "2026-09-02T18:30:00.000Z",
+    "scope": "write:payments",
+    "method": "POST",
+    "endpoint": "/api/payments",
+    "request_digest": "sha256:...",
+    "summary": "Pay Alex $50"
+  }
+}
+```
+
+The agent gives `confirmation.action_session_url` to the human. After the
+human confirms on AgentAdmit's hosted page with their passkey, the agent
+retries the same request with:
+
+```http
+X-AgentAdmit-Action-Attestation: asess_abc
+```
+
+The SDK always forwards that header. A route configured with
+`ActionSummary` also sends a `sha256:` digest of the raw request body and the
+plain-language summary, while restoring the body for the handler. The hosted
+signature commits to the scope, method, endpoint, digest, and summary; a
+different retry is refused. The summary is supplied by your app: AgentAdmit
+proves what the human saw but does not verify the description against the
+request.
+
+The net/http middleware (`MiddlewareWithOptions`,
+`RequireAgentMiddlewareWithOptions`) and the `gin`/`echo` adapters
+(`aggin.MiddlewareWithOptions`, `aggin.RequireAgentWithOptions`,
+`agecho.MiddlewareWithOptions`, `agecho.RequireAgentWithOptions`) all write
+the same 403 body. If a presented attestation is rejected, the body also
+carries `attestation_status` (`already_consumed`, `action_mismatch`,
+`expired`, `not_confirmed`) and `attestation_description`. A ceremony block
+that does not parse strictly is dropped and the refusal stands as a generic
+fail-closed 403 with no link; every other refusal class is unchanged.
+
+Direct callers of `Validate*` see the typed refusal. It wraps
+`*AgentAdmitError` (code `ErrCodeCallRefused`, `VerifyError`
+`"confirmation_required"`), so existing `errors.As` gates keep working:
+
+```go
+info, err := client.ValidateContextWithTelemetry(ctx, token, []string{"write:payments"},
+    agentadmit.RequestTelemetryWithOptions(r, opts, "write:payments"))
+var confErr *agentadmit.ConfirmationRequiredError
+if errors.As(err, &confErr) {
+    // Relay confErr.Confirmation.ActionSessionURL to the human; retry with
+    // X-AgentAdmit-Action-Attestation: confErr.Confirmation.ActionSessionID
+}
+```
+
+`agentadmit.IsConfirmationRequired(err)` is the shorthand. On an accepted
+retry, `agentadmit.ActionConfirmationFromContext(ctx)`,
+`aggin.GetActionConfirmation(c)`, and `agecho.GetActionConfirmation(c)`
+expose the strictly parsed consumed ceremony (`action_session_id`,
+`consumed: true`), so an app running its own transaction step-up can treat
+it as that confirmation instead of asking the human twice.
+
 ## Context Support
 
 All SDK methods accept a `context.Context` for graceful cancellation and deadline propagation:
