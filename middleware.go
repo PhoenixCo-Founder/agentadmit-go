@@ -183,7 +183,8 @@ func insufficientScopeBody(aaErr *AgentAdmitError) []byte {
 // hosted error_description/bound/renewal fields are passed through verbatim;
 // for a confirmation_required refusal it carries the strictly typed
 // confirmation block (plus attestation_status/attestation_description when
-// present) so the agent can hand the link to the human;
+// present) so the agent can hand the link to the human; for a
+// confirmation_declined refusal it carries the strictly typed declined block;
 // for unknown refusal codes the body is the generic fail-closed shape
 // {error, error_description}. Exported so the gin and echo adapters share
 // the exact same body semantics as the net/http middleware.
@@ -203,6 +204,10 @@ func CallRefusedPayload(aaErr *AgentAdmitError) map[string]interface{} {
 	// to complete, plus why a presented attestation was not accepted.
 	if aaErr.Confirmation != nil {
 		payload["confirmation"] = aaErr.Confirmation
+	}
+	// Confirm-each-time: the user's decline for this exact action (1.12.0).
+	if aaErr.Declined != nil {
+		payload["declined"] = aaErr.Declined
 	}
 	if aaErr.AttestationStatus != "" {
 		payload["attestation_status"] = aaErr.AttestationStatus

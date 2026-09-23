@@ -78,6 +78,143 @@ func sha256Of(s string) string {
 // §2: confirmation_required is a 403 carrying the staged ceremony
 // ---------------------------------------------------------------------------
 
+const confirmationDeclinedResponse = `{
+  "active": true,
+  "error": "confirmation_declined",
+  "error_description": "The user declined this action on the hosted confirmation page. Do not retry it unless the user asks you to; no new confirmation can be staged for this action until 2026-09-22T21:50:42.000Z.",
+  "declined": {
+    "action_session_id": "asess_abc",
+    "declined_at": "2026-09-22T21:35:42.000Z",
+    "hold_until": "2026-09-22T21:50:42.000Z",
+    "scope": "write:payments",
+    "method": "POST",
+    "endpoint": "/api/payments",
+    "request_digest": "sha256:deadbeef",
+    "summary": "Pay Alex $50"
+  },
+  "attestation_status": "declined",
+  "attestation_description": "The user declined this action.",
+  "renewal": "Only the user can lift a decline. After the hold ends, a retry stages a fresh confirmation for them to approve or decline again.",
+  "scopes": ["leak"],
+  "user_id": "u1"
+}`
+
+func TestConfirmationDeclined_403CarriesTheDeclineAndNothingElse(t *testing.T) {
+	var captured []map[string]interface{}
+	client := newTelemetryClient(t, confirmationDeclinedResponse, &captured)
+
+	var invoked bool
+	var seen string
+	handler := client.MiddlewareWithOptions(payOptions(), "write:payments")(echoBodyHandler(&invoked, &seen))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/payments", strings.NewReader(`{"trainer":"alex"}`))
+	req.Header.Set("Authorization", "Bearer ag_at_tok")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403: %s", rec.Code, rec.Body.String())
+	}
+	if invoked {
+		t.Fatal("handler ran on a declined call — fail-closed broken")
+	}
+	var body struct {
+		Error            string              `json:"error"`
+		ErrorDescription string              `json:"error_description"`
+		Declined         *ActionDecline      `json:"declined"`
+		Confirmation     *ActionConfirmation `json:"confirmation"`
+		AttestationStat  string              `json:"attestation_status"`
+		AttestationDesc  string              `json:"attestation_description"`
+		Renewal          string              `json:"renewal"`
+		Scopes           []string            `json:"scopes"`
+		UserID           string              `json:"user_id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("403 body is not valid JSON: %v (%s)", err, rec.Body.String())
+	}
+	if body.Error != "confirmation_declined" {
+		t.Errorf("error = %q", body.Error)
+	}
+	if !strings.Contains(body.ErrorDescription, "Do not retry") {
+		t.Errorf("error_description = %q", body.ErrorDescription)
+	}
+	if body.Declined == nil || body.Declined.ActionSessionID != "asess_abc" || body.Declined.HoldUntil != "2026-09-22T21:50:42.000Z" {
+		t.Fatalf("declined = %+v", body.Declined)
+	}
+	if body.Declined.Method == nil || *body.Declined.Method != "POST" || body.Declined.Summary == nil || *body.Declined.Summary != "Pay Alex $50" {
+		t.Errorf("declined binding fields = %+v", body.Declined)
+	}
+	if body.Confirmation != nil {
+		t.Error("a decline must not carry a confirmation block")
+	}
+	if body.AttestationStat != "declined" || !strings.Contains(body.AttestationDesc, "declined") {
+		t.Errorf("attestation = %q / %q", body.AttestationStat, body.AttestationDesc)
+	}
+	if !strings.Contains(body.Renewal, "Only the user") {
+		t.Errorf("renewal = %q", body.Renewal)
+	}
+	if len(body.Scopes) != 0 || body.UserID != "" {
+		t.Errorf("refusal leaked wire fields: scopes=%v user_id=%q", body.Scopes, body.UserID)
+	}
+}
+
+func TestConfirmationDeclinedError_TypedForCustomGates(t *testing.T) {
+	var captured []map[string]interface{}
+	client := newTelemetryClient(t, confirmationDeclinedResponse, &captured)
+
+	_, err := client.Validate("ag_at_tok", []string{"write:payments"})
+	var declErr *ConfirmationDeclinedError
+	if !errors.As(err, &declErr) {
+		t.Fatalf("err = %v (%T), want *ConfirmationDeclinedError", err, err)
+	}
+	if declErr.Declined == nil || declErr.Declined.ActionSessionID != "asess_abc" || declErr.Declined.DeclinedAt != "2026-09-22T21:35:42.000Z" {
+		t.Fatalf("declined = %+v", declErr.Declined)
+	}
+	if declErr.AttestationStatus != "declined" {
+		t.Errorf("attestation_status = %q", declErr.AttestationStatus)
+	}
+	if !IsConfirmationDeclined(err) || IsConfirmationRequired(err) {
+		t.Error("IsConfirmationDeclined/IsConfirmationRequired mismatch")
+	}
+	var aaErr *AgentAdmitError
+	if !errors.As(err, &aaErr) {
+		t.Fatal("typed refusal is not reachable as *AgentAdmitError")
+	}
+	if aaErr.Code != ErrCodeCallRefused || aaErr.VerifyError != VerifyErrorConfirmationDeclined {
+		t.Errorf("code = %s, verify_error = %s", aaErr.Code, aaErr.VerifyError)
+	}
+	if !IsCallRefused(err) || !strings.Contains(err.Error(), "confirmation_declined") {
+		t.Errorf("IsCallRefused/Error() = %v / %q", IsCallRefused(err), err.Error())
+	}
+}
+
+func TestConfirmationDeclined_MalformedBlockFailsClosedWithDefaultDescription(t *testing.T) {
+	var captured []map[string]interface{}
+	client := newTelemetryClient(t, `{"active":true,"error":"confirmation_declined","declined":{"action_session_id":"asess_abc","hold_until":7,"declined_at":"d","scope":"s"}}`, &captured)
+
+	_, err := client.Validate("ag_at_tok", []string{"write:payments"})
+	if IsConfirmationDeclined(err) {
+		t.Fatal("malformed declined block must not produce the typed error")
+	}
+	var aaErr *AgentAdmitError
+	if !errors.As(err, &aaErr) || aaErr.Code != ErrCodeCallRefused || aaErr.VerifyError != "confirmation_declined" {
+		t.Fatalf("err = %v", err)
+	}
+	if aaErr.Declined != nil {
+		t.Error("malformed block was relayed")
+	}
+	if !strings.Contains(aaErr.ErrorDescription, "unless the user asks") {
+		t.Errorf("error_description = %q", aaErr.ErrorDescription)
+	}
+	payload := CallRefusedPayload(aaErr)
+	if _, has := payload["declined"]; has {
+		t.Error("403 payload carried a malformed decline")
+	}
+	if parseActionDecline(nil) != nil || parseActionDecline(json.RawMessage(`"x"`)) != nil {
+		t.Error("parseActionDecline accepted a non-object")
+	}
+}
+
 func TestConfirmationRequired_403CarriesTheCeremony(t *testing.T) {
 	var captured []map[string]interface{}
 	client := newTelemetryClient(t, confirmationRefusalResponse, &captured)
