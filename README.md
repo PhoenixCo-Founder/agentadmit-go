@@ -489,7 +489,23 @@ if errors.As(err, &confErr) {
 }
 ```
 
-`agentadmit.IsConfirmationRequired(err)` is the shorthand. On an accepted
+`agentadmit.IsConfirmationRequired(err)` is the shorthand.
+
+**The user can decline.** If the user taps Decline on the hosted page, the
+hosted service answers the agent's retry with `confirmation_declined` and
+holds that answer until `declined.hold_until`; no new ceremony is staged and
+the user is not notified again. Every middleware writes a 403 with the
+strictly typed `declined` block (`action_session_id`, `declined_at`,
+`hold_until`, `scope`, plus nullable `method`, `endpoint`, `request_digest`,
+`summary`) and `renewal`; direct callers get `*agentadmit.ConfirmationDeclinedError`
+(wrapping `*AgentAdmitError`, `VerifyError` `"confirmation_declined"`, field
+`Declined`), with `agentadmit.IsConfirmationDeclined(err)` as the shorthand.
+Agents should relay the decline to the user and not retry unless the user
+asks; only the user can lift a decline, and after the hold ends a retry stages
+a fresh confirmation. A malformed `declined` block is dropped and the refusal
+stands as a generic fail-closed 403 with no block.
+
+On an accepted
 retry, `agentadmit.ActionConfirmationFromContext(ctx)`,
 `aggin.GetActionConfirmation(c)`, and `agecho.GetActionConfirmation(c)`
 expose the strictly parsed consumed ceremony (`action_session_id`,

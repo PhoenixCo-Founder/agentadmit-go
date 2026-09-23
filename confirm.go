@@ -58,6 +58,34 @@ const (
 const confirmationRequiredDescription = "This action requires a fresh human confirmation. " +
 	"Give the confirmation link to the user, then retry with the X-AgentAdmit-Action-Attestation header."
 
+// confirmationDeclinedDescription is the fixed fallback description written
+// when the hosted service does not supply its own on a confirmation_declined
+// refusal.
+const confirmationDeclinedDescription = "The user declined this action on the hosted confirmation page. " +
+	"Do not retry it unless the user asks you to."
+
+// ActionDecline is the human's explicit no (1.12.0): the user declined
+// exactly this action on the hosted confirmation page, and the hosted
+// service holds that answer until HoldUntil. It is carried on a
+// confirmation_declined refusal; no new ceremony is staged and the user is
+// not notified again while the hold runs. Agents should relay the decline to
+// the user and not retry unless the user asks. Only the user can lift a
+// decline; after the hold ends, a retry stages a fresh confirmation.
+//
+// Method, Endpoint, RequestDigest, and Summary are nullable on the wire and
+// are marshalled back out as JSON null when absent, so the 403 body an agent
+// receives has the same shape across every AgentAdmit SDK.
+type ActionDecline struct {
+	ActionSessionID string  `json:"action_session_id"`
+	DeclinedAt      string  `json:"declined_at"`
+	HoldUntil       string  `json:"hold_until"`
+	Scope           string  `json:"scope"`
+	Method          *string `json:"method"`
+	Endpoint        *string `json:"endpoint"`
+	RequestDigest   *string `json:"request_digest"`
+	Summary         *string `json:"summary"`
+}
+
 // ActionConfirmation is the hosted confirm-each-time ceremony staged for one
 // exact action, carried on a confirmation_required refusal. The agent hands
 // ActionSessionURL to the human; only a user-verified passkey on that page
@@ -117,6 +145,26 @@ func (e *ConfirmationRequiredError) Unwrap() error { return e.AgentAdmitError }
 func IsConfirmationRequired(err error) bool {
 	var confErr *ConfirmationRequiredError
 	return errors.As(err, &confErr)
+}
+
+// ConfirmationDeclinedError is the typed confirmation_declined refusal
+// (1.12.0): the user declined exactly this action on the hosted page and the
+// hold still runs. It wraps the *AgentAdmitError (Code ErrCodeCallRefused,
+// VerifyError "confirmation_declined") so existing errors.As gates keep
+// working; Declined is the strictly parsed block. Only produced when the
+// block parsed; a malformed block stays a plain refusal with no block.
+type ConfirmationDeclinedError struct {
+	*AgentAdmitError
+}
+
+// Unwrap exposes the embedded *AgentAdmitError to errors.As / errors.Is.
+func (e *ConfirmationDeclinedError) Unwrap() error { return e.AgentAdmitError }
+
+// IsConfirmationDeclined reports whether err is a confirm-each-time refusal
+// carrying the user's decline for this exact action.
+func IsConfirmationDeclined(err error) bool {
+	var declErr *ConfirmationDeclinedError
+	return errors.As(err, &declErr)
 }
 
 // ScopeOptions configures a confirm-each-time route. The zero value behaves
@@ -260,6 +308,36 @@ func parseActionConfirmation(raw json.RawMessage) *ActionConfirmation {
 		Endpoint:         nullableString(fields["endpoint"]),
 		RequestDigest:    nullableString(fields["request_digest"]),
 		Summary:          nullableString(fields["summary"]),
+	}
+}
+
+// parseActionDecline returns the strictly typed declined block from a
+// confirmation_declined refusal, or nil. Strict on the four identifying
+// fields (all must be JSON strings); the four binding fields are nullable.
+func parseActionDecline(raw json.RawMessage) *ActionDecline {
+	if len(raw) == 0 {
+		return nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+		return nil
+	}
+	id, okID := rawString(fields["action_session_id"])
+	declinedAt, okDeclined := rawString(fields["declined_at"])
+	holdUntil, okHold := rawString(fields["hold_until"])
+	scope, okScope := rawString(fields["scope"])
+	if !okID || !okDeclined || !okHold || !okScope {
+		return nil
+	}
+	return &ActionDecline{
+		ActionSessionID: id,
+		DeclinedAt:      declinedAt,
+		HoldUntil:       holdUntil,
+		Scope:           scope,
+		Method:          nullableString(fields["method"]),
+		Endpoint:        nullableString(fields["endpoint"]),
+		RequestDigest:   nullableString(fields["request_digest"]),
+		Summary:         nullableString(fields["summary"]),
 	}
 }
 

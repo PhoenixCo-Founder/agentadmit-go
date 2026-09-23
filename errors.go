@@ -96,9 +96,15 @@ type AgentAdmitError struct {
 	// refusal then fails closed with no link). See ConfirmationRequiredError.
 	Confirmation *ActionConfirmation
 
+	// Declined is the human's explicit no for exactly this action, on a
+	// confirmation_declined refusal (1.12.0). Nil when there was none or the
+	// wire block did not parse strictly (the refusal then fails closed with
+	// no block). See ConfirmationDeclinedError.
+	Declined *ActionDecline
+
 	// AttestationStatus explains why an attestation the agent presented was
 	// not accepted — e.g. already_consumed, action_mismatch, expired,
-	// not_confirmed. Empty when none was presented.
+	// not_confirmed, declined. Empty when none was presented.
 	AttestationStatus string
 
 	// AttestationDescription is the hosted human-readable companion to

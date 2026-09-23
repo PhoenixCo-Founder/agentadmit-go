@@ -316,6 +316,9 @@ func (c *Client) ValidateContextWithTelemetry(ctx context.Context, token string,
 			if denial.Confirmation != nil {
 				return nil, &ConfirmationRequiredError{AgentAdmitError: denial}
 			}
+			if denial.Declined != nil {
+				return nil, &ConfirmationDeclinedError{AgentAdmitError: denial}
+			}
 			return nil, denial
 		}
 
@@ -478,6 +481,10 @@ func truncateRunes(s string, max int) string {
 //     attestation_status/attestation_description, so the agent can hand the
 //     link to the human and retry. A malformed ceremony is dropped and the
 //     refusal stands with no link.
+//   - confirmation_declined → ErrCodeCallRefused carrying the user's decline
+//     (strictly parsed) plus any attestation_status/attestation_description,
+//     so the agent can relay the decline instead of retrying. A malformed
+//     block is dropped and the refusal stands with no block.
 //   - any other error string → ErrCodeCallRefused with a generic
 //     description: forward-compatible fail-closed.
 func activeErrorDenial(info *TokenInfo, respBytes []byte, requiredScopes []string) *AgentAdmitError {
@@ -533,6 +540,33 @@ func activeErrorDenial(info *TokenInfo, respBytes []byte, requiredScopes []strin
 			refusal.ErrorDescription = description
 		}
 		refusal.Confirmation = parseActionConfirmation(fields["confirmation"])
+		if status, ok := rawString(fields["attestation_status"]); ok {
+			refusal.AttestationStatus = status
+		}
+		if description, ok := rawString(fields["attestation_description"]); ok {
+			refusal.AttestationDescription = description
+		}
+		if renewal := fields["renewal"]; len(renewal) > 0 && string(renewal) != "null" {
+			refusal.Renewal = renewal
+		}
+		return refusal
+
+	case VerifyErrorConfirmationDeclined:
+		// Confirm-each-time (1.12.0): the user declined exactly this action
+		// on the hosted page and the hold still runs. Relay the decline so
+		// the agent can tell the user instead of nagging with a link; a
+		// type-malformed sibling field must not cost the agent the block.
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(respBytes, &fields)
+
+		refusal := newError(ErrCodeCallRefused,
+			"call refused by the authorization service: confirmation_declined", nil)
+		refusal.VerifyError = VerifyErrorConfirmationDeclined
+		refusal.ErrorDescription = confirmationDeclinedDescription
+		if description, ok := rawString(fields["error_description"]); ok && description != "" {
+			refusal.ErrorDescription = description
+		}
+		refusal.Declined = parseActionDecline(fields["declined"])
 		if status, ok := rawString(fields["attestation_status"]); ok {
 			refusal.AttestationStatus = status
 		}

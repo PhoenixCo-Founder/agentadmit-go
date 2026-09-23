@@ -66,6 +66,12 @@ const (
 	// carries the staged ceremony — see ActionConfirmation and
 	// ConfirmationRequiredError.
 	VerifyErrorConfirmationRequired = "confirmation_required"
+
+	// VerifyErrorConfirmationDeclined is returned by the hosted service when
+	// the user declined exactly this action on the hosted confirmation page
+	// and the hold still runs. The response carries the decline — see
+	// ActionDecline and ConfirmationDeclinedError.
+	VerifyErrorConfirmationDeclined = "confirmation_declined"
 )
 
 // TokenInfo contains validated token metadata returned by AgentAdmit
