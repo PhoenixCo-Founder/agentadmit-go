@@ -1,6 +1,7 @@
 package agentadmit
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -76,6 +77,12 @@ func (c *Client) MiddlewareWithOptions(opts ScopeOptions, requiredScopes ...stri
 
 			// Attach TokenInfo to context for downstream handlers.
 			ctx := contextWithToken(r.Context(), info)
+			if opts.ReportOutcome {
+				rec := &statusRecorder{ResponseWriter: w}
+				next.ServeHTTP(rec, r.WithContext(ctx))
+				c.reportOutcomeFromStatus(r, info, rec.Status())
+				return
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -111,9 +118,53 @@ func (c *Client) RequireAgentMiddlewareWithOptions(opts ScopeOptions, requiredSc
 			}
 
 			ctx := contextWithToken(r.Context(), info)
+			if opts.ReportOutcome {
+				rec := &statusRecorder{ResponseWriter: w}
+				next.ServeHTTP(rec, r.WithContext(ctx))
+				c.reportOutcomeFromStatus(r, info, rec.Status())
+				return
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *statusRecorder) Write(b []byte) (int, error) {
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+	return r.ResponseWriter.Write(b)
+}
+
+func (r *statusRecorder) Status() int {
+	if r.status == 0 {
+		return http.StatusOK
+	}
+	return r.status
+}
+
+func (c *Client) reportOutcomeFromStatus(r *http.Request, info *TokenInfo, statusCode int) {
+	if info == nil || info.AuditRowID == "" || r.Context().Err() != nil {
+		return
+	}
+	statusClass := StatusClassFor(statusCode)
+	outcome := OutcomeForStatus(statusCode)
+	if statusClass == nil || outcome == nil {
+		return
+	}
+	go func() {
+		_, _ = c.ReportOutcome(context.Background(), info.AuditRowID, *outcome, statusClass)
+	}()
 }
 
 // writeMiddlewareError writes an appropriate HTTP error response based on the

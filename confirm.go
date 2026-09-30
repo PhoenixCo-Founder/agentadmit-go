@@ -183,6 +183,13 @@ type ScopeOptions struct {
 	// confirmation page and committed into the passkey signature; AgentAdmit
 	// does not verify it against the request.
 	ActionSummary func(r *http.Request, body []byte) string
+
+	// ReportOutcome enables the post-handler outcome hook. When true, the
+	// middleware reports only after the app handler returns with a valid HTTP
+	// status and the request context was not canceled. Aborted responses are
+	// left unreported; use ReportOutcome directly if your app must record
+	// OutcomeUnknown.
+	ReportOutcome bool
 }
 
 // RequestDigest returns "sha256:<hex>" over the raw request body bytes, or ""

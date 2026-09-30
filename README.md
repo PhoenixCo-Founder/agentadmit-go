@@ -607,6 +607,26 @@ Use `agentadmit.IsRateLimit(err)` for a quick boolean check.
 
 Full integration guide: https://agentadmit.com/docs/app-owner-guide
 
+## Outcome Reporting
+
+Successful verify responses can include `AuditRowID`. Use it to append what your app reported happened after the guarded handler ran:
+
+```go
+statusClass := agentadmit.Status2xx
+report, err := client.ReportOutcome(ctx, tokenInfo.AuditRowID, agentadmit.OutcomeExecuted, &statusClass)
+_ = report
+```
+
+`Outcome` is `OutcomeExecuted`, `OutcomeFailed`, or `OutcomeUnknown`; `StatusClass` is optional and must be `Status1xx` through `Status5xx`. Automatic net/http, Gin, and Echo reporting is opt-in:
+
+```go
+mux.Handle("/api/payments", client.MiddlewareWithOptions(
+    agentadmit.ScopeOptions{ReportOutcome: true},
+    "write:payments",
+)(handler))
+```
+
+With `ReportOutcome: true`, the SDK reports only after the downstream handler returns and the verify result contains `AuditRowID`. HTTP status `<400` maps to `executed`; status `>=400` maps to `failed`. The SDK does not guess `unknown`, skips canceled or unobservable responses, and reporting failures do not replace your app response. A hosted `already_consumed` replay diagnostic is exposed as `ConsumedReceipt`; it is review data, not authorization to run the action again.
 
 ## Data Collection & Privacy
 

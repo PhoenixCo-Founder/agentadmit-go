@@ -17,6 +17,7 @@
 package agecho
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -65,7 +66,19 @@ func MiddlewareWithOptions(client *agentadmit.Client, opts agentadmit.ScopeOptio
 			}
 
 			c.Set(TokenInfoKey, info)
-			return next(c)
+			err = next(c)
+			if err == nil && opts.ReportOutcome && c.Request().Context().Err() == nil {
+				status := c.Response().Status
+				if status == 0 {
+					status = 200
+				}
+				statusClass := agentadmit.StatusClassFor(status)
+				outcome := agentadmit.OutcomeForStatus(status)
+				if info.AuditRowID != "" && statusClass != nil && outcome != nil {
+					go func() { _, _ = client.ReportOutcome(context.Background(), info.AuditRowID, *outcome, statusClass) }()
+				}
+			}
+			return err
 		}
 	}
 }
@@ -96,7 +109,19 @@ func RequireAgentWithOptions(client *agentadmit.Client, opts agentadmit.ScopeOpt
 			}
 
 			c.Set(TokenInfoKey, info)
-			return next(c)
+			err = next(c)
+			if err == nil && opts.ReportOutcome && c.Request().Context().Err() == nil {
+				status := c.Response().Status
+				if status == 0 {
+					status = 200
+				}
+				statusClass := agentadmit.StatusClassFor(status)
+				outcome := agentadmit.OutcomeForStatus(status)
+				if info.AuditRowID != "" && statusClass != nil && outcome != nil {
+					go func() { _, _ = client.ReportOutcome(context.Background(), info.AuditRowID, *outcome, statusClass) }()
+				}
+			}
+			return err
 		}
 	}
 }
