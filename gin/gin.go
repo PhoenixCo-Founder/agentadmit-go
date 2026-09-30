@@ -17,6 +17,7 @@
 package aggin
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -67,6 +68,17 @@ func MiddlewareWithOptions(client *agentadmit.Client, opts agentadmit.ScopeOptio
 
 		c.Set(TokenInfoKey, info)
 		c.Next()
+		if opts.ReportOutcome && !c.IsAborted() && c.Request.Context().Err() == nil {
+			status := c.Writer.Status()
+			if status == 0 {
+				status = 200
+			}
+			statusClass := agentadmit.StatusClassFor(status)
+			outcome := agentadmit.OutcomeForStatus(status)
+			if info.AuditRowID != "" && statusClass != nil && outcome != nil {
+				go func() { _, _ = client.ReportOutcome(context.Background(), info.AuditRowID, *outcome, statusClass) }()
+			}
+		}
 	}
 }
 
@@ -98,6 +110,17 @@ func RequireAgentWithOptions(client *agentadmit.Client, opts agentadmit.ScopeOpt
 
 		c.Set(TokenInfoKey, info)
 		c.Next()
+		if opts.ReportOutcome && !c.IsAborted() && c.Request.Context().Err() == nil {
+			status := c.Writer.Status()
+			if status == 0 {
+				status = 200
+			}
+			statusClass := agentadmit.StatusClassFor(status)
+			outcome := agentadmit.OutcomeForStatus(status)
+			if info.AuditRowID != "" && statusClass != nil && outcome != nil {
+				go func() { _, _ = client.ReportOutcome(context.Background(), info.AuditRowID, *outcome, statusClass) }()
+			}
+		}
 	}
 }
 

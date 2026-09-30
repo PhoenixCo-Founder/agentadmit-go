@@ -142,7 +142,39 @@ type TokenInfo struct {
 	// consumed: true. Use it as your own transaction step-up instead of
 	// asking the human twice. See ActionConfirmationFromContext.
 	ActionConfirmation *ActionConfirmationConsumed `json:"action_confirmation,omitempty"`
+
+	// AuditRowID identifies this successful verify call in AgentAdmit's
+	// tamper-evident audit trail. Use ReportOutcome to append what the app
+	// observed after the handler ran.
+	AuditRowID string `json:"audit_row_id,omitempty"`
+
+	// ConsumedReceipt is present only on an already_consumed replay
+	// diagnostic. It is not a fresh authorization and must not be treated as
+	// permission to run again.
+	ConsumedReceipt *ConsumedReceipt `json:"consumed_receipt,omitempty"`
 }
+
+type ConsumedReceipt struct {
+	ConsumedAt   string  `json:"consumed_at"`
+	ConnectionID string  `json:"connection_id"`
+	ChainSeq     *int64  `json:"chain_seq"`
+	RowHash      *string `json:"row_hash"`
+}
+
+type Outcome string
+type StatusClass string
+
+const (
+	OutcomeExecuted Outcome = "executed"
+	OutcomeFailed   Outcome = "failed"
+	OutcomeUnknown  Outcome = "unknown"
+
+	Status1xx StatusClass = "1xx"
+	Status2xx StatusClass = "2xx"
+	Status3xx StatusClass = "3xx"
+	Status4xx StatusClass = "4xx"
+	Status5xx StatusClass = "5xx"
+)
 
 // ValidationResult is the full response envelope from the AgentAdmit
 // introspection API.
