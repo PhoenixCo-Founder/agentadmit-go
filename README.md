@@ -370,6 +370,29 @@ if err == nil && info.UserIntent != "" {
 
 Do not branch authorization on `UserIntent` — grant or deny with scopes, connection status, and consent, and treat the user's words as context for humans reviewing the connection later.
 
+## Agent Designation
+
+On AgentAdmit's consent page the user says which agent app a connection is for and, optionally, which AI model family it mainly uses. That is the user's statement, recorded with the grant; it is not a verified identity of the agent. Separately, an agent may report its own platform and model when it redeems the connection token; that is unverified too.
+
+Both come back on verification as `TokenInfo.DesignatedAgent` and `TokenInfo.AgentReported`. Each is `nil` when the connection carries none:
+
+```go
+info, err := client.Validate(token, []string{"read:orders"})
+if err == nil {
+    if d := info.DesignatedAgent; d != nil {
+        // d.AgentID, d.Name, d.Source == "user_declared", d.Model (nil when not named)
+        log.Printf("named by the user: %s", d.Name)
+    }
+    if r := info.AgentReported; r != nil && r.Model != nil {
+        log.Printf("reported by the agent: %s", r.Model.ID)
+    }
+}
+```
+
+Use `DesignatedAgent.Name` when you tell a user which of their connections did something: it is the name they chose. `AgentID` and `Model.ModelID` are the ids of your list entries, and are empty when the user typed a name that is not on your list. In middleware, read them from `TokenFromContext(ctx)`. The strict readers are exported as `ParseDesignatedAgent` and `ParseAgentReported`.
+
+Do not branch authorization on either field. They are records for people reviewing a connection, not a gate. Scope checks, connection status, and consent verdicts remain the only decision inputs. To act on a designation, use the hosted revoke API (`designated_agent_id`, `designated_model_id`) or your list's block setting in the dashboard.
+
 ## App-Attested Presence
 
 If your app gates token minting behind its own embedded passkey/WebAuthn ceremony, AgentAdmit never witnesses that ceremony (it is origin-bound), so by default the hosted service reports `presence.verified: false` for those connections. Attest the ceremony fact at issuance to close that gap — AFTER verifying and consuming your own fresh, purpose-bound attestation:

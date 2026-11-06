@@ -152,6 +152,59 @@ type TokenInfo struct {
 	// diagnostic. It is not a fresh authorization and must not be treated as
 	// permission to run again.
 	ConsumedReceipt *ConsumedReceipt `json:"consumed_receipt,omitempty"`
+
+	// DesignatedAgent is the agent app (and, when the user named one, the
+	// AI model family) the USER said this connection is for on the consent
+	// page. Declared by the user; not a verified identity of the agent.
+	// Additive; nil when the connection carries no designation, on older
+	// servers, and when the block is malformed. It is a review-time record
+	// only, never an enforcement input.
+	DesignatedAgent *DesignatedAgent `json:"designated_agent,omitempty"`
+
+	// AgentReported is what the AGENT reported about itself when it redeemed
+	// the connection token (its platform and model). Unverified. Additive;
+	// nil when it reported neither. It is a review-time record only, never
+	// an enforcement input.
+	AgentReported *AgentReported `json:"agent_reported,omitempty"`
+}
+
+// DesignatedAgent is the agent the user named for a connection (1.14.0).
+type DesignatedAgent struct {
+	// AgentID is the id of the app owner's list entry the user picked.
+	// Empty when the user typed a name that is not on the list.
+	AgentID string `json:"agent_id,omitempty"`
+	// Name is the agent app name as granted.
+	Name string `json:"name"`
+	// Source is always "user_declared".
+	Source string `json:"source"`
+	// Model is the AI model family the user named; nil when they named none.
+	Model *DesignatedModel `json:"model,omitempty"`
+}
+
+// DesignatedModel is the AI model family the user named for the agent.
+type DesignatedModel struct {
+	// ModelID is the id of the app owner's list entry. Empty when the user
+	// typed a name that is not on the list.
+	ModelID string `json:"model_id,omitempty"`
+	Name    string `json:"name"`
+}
+
+// AgentReported is what the agent reported it runs on at exchange (1.14.0).
+// Unverified.
+type AgentReported struct {
+	// Platform is the agent app or runtime the agent says it runs in. Empty
+	// when it reported none.
+	Platform string `json:"platform,omitempty"`
+	// Model is the AI model the agent says it runs on; nil when it reported
+	// none.
+	Model *AgentReportedModel `json:"model,omitempty"`
+}
+
+// AgentReportedModel is the model an agent reported about itself.
+type AgentReportedModel struct {
+	ID string `json:"id"`
+	// Version is empty when the agent reported none.
+	Version string `json:"version,omitempty"`
 }
 
 type ConsumedReceipt struct {
