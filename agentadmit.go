@@ -364,6 +364,8 @@ func decodeVerifyResponse(data []byte) (*TokenInfo, error) {
 		RawConsent            json.RawMessage `json:"consent"`
 		RawPresence           json.RawMessage `json:"presence"`
 		RawActionConfirmation json.RawMessage `json:"action_confirmation"`
+		RawDesignatedAgent    json.RawMessage `json:"designated_agent"`
+		RawAgentReported      json.RawMessage `json:"agent_reported"`
 	}
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return nil, err
@@ -392,7 +394,71 @@ func decodeVerifyResponse(data []byte) (*TokenInfo, error) {
 	// block reaches the context; anything else is absent, never a claim that
 	// a human confirmed.
 	info.ActionConfirmation = parseActionConfirmationConsumed(envelope.RawActionConfirmation)
+	// Agent designation (1.14.0): who the USER said the connection is for,
+	// and what the agent reported about itself. Decoded leniently like the
+	// blocks above: a malformed block is dropped, never a failed verify.
+	info.DesignatedAgent = ParseDesignatedAgent(envelope.RawDesignatedAgent)
+	info.AgentReported = ParseAgentReported(envelope.RawAgentReported)
 	return &info, nil
+}
+
+// ParseDesignatedAgent is the strict reader for the verify response's
+// designated_agent block. Only an object with a non-empty string name and
+// source "user_declared" is accepted; anything else returns nil, never a
+// coerced value. A malformed model is dropped and the app is kept.
+func ParseDesignatedAgent(raw []byte) *DesignatedAgent {
+	var fields map[string]json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &fields) != nil || fields == nil {
+		return nil
+	}
+	name, ok := rawString(fields["name"])
+	if !ok || name == "" {
+		return nil
+	}
+	if source, ok := rawString(fields["source"]); !ok || source != "user_declared" {
+		return nil
+	}
+	out := &DesignatedAgent{Name: name, Source: "user_declared"}
+	if id, ok := rawString(fields["agent_id"]); ok {
+		out.AgentID = id
+	}
+	var model map[string]json.RawMessage
+	if len(fields["model"]) > 0 && json.Unmarshal(fields["model"], &model) == nil && model != nil {
+		if modelName, ok := rawString(model["name"]); ok && modelName != "" {
+			out.Model = &DesignatedModel{Name: modelName}
+			if id, ok := rawString(model["model_id"]); ok {
+				out.Model.ModelID = id
+			}
+		}
+	}
+	return out
+}
+
+// ParseAgentReported is the strict reader for the verify response's
+// agent_reported block. It returns nil when the block carries neither a
+// string platform nor a model with a string id.
+func ParseAgentReported(raw []byte) *AgentReported {
+	var fields map[string]json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &fields) != nil || fields == nil {
+		return nil
+	}
+	out := &AgentReported{}
+	if platform, ok := rawString(fields["platform"]); ok {
+		out.Platform = platform
+	}
+	var model map[string]json.RawMessage
+	if len(fields["model"]) > 0 && json.Unmarshal(fields["model"], &model) == nil && model != nil {
+		if id, ok := rawString(model["id"]); ok && id != "" {
+			out.Model = &AgentReportedModel{ID: id}
+			if version, ok := rawString(model["version"]); ok {
+				out.Model.Version = version
+			}
+		}
+	}
+	if out.Platform == "" && out.Model == nil {
+		return nil
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------
