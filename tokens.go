@@ -189,6 +189,13 @@ type ExchangeRequest struct {
 	AgentLabel    string                 `json:"agent_label,omitempty"`
 	AgentID       string                 `json:"agent_id,omitempty"`
 	AgentMetadata map[string]interface{} `json:"agent_metadata,omitempty"`
+	// AgentPlatform is the agent app or runtime the agent says it runs in.
+	// Reported by the agent, unverified; omitted when empty.
+	AgentPlatform string `json:"agent_platform,omitempty"`
+	// AgentModel is the AI model the agent says it runs on. Reported by the
+	// agent, unverified; omitted when nil. The hosted service records both
+	// and never lets them decide the outcome of the exchange.
+	AgentModel *AgentReportedModel `json:"agent_model,omitempty"`
 }
 
 // ExchangeResponse is returned by POST /api/v1/exchange.

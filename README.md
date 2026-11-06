@@ -391,6 +391,8 @@ if err == nil {
 
 Use `DesignatedAgent.Name` when you tell a user which of their connections did something: it is the name they chose. `AgentID` and `Model.ModelID` are the ids of your list entries, and are empty when the user typed a name that is not on your list. In middleware, read them from `TokenFromContext(ctx)`. The strict readers are exported as `ParseDesignatedAgent` and `ParseAgentReported`.
 
+If your code redeems connection tokens with `Exchange`, set `AgentPlatform` and `AgentModel` on `ExchangeRequest` to pass along what the agent says it runs on (since 1.14.1).
+
 Do not branch authorization on either field. They are records for people reviewing a connection, not a gate. Scope checks, connection status, and consent verdicts remain the only decision inputs. To act on a designation, use the hosted revoke API (`designated_agent_id`, `designated_model_id`) or your list's block setting in the dashboard.
 
 ## App-Attested Presence
