@@ -537,6 +537,71 @@ expose the strictly parsed consumed ceremony (`action_session_id`,
 `consumed: true`), so an app running its own transaction step-up can treat
 it as that confirmation instead of asking the human twice.
 
+### Confirm each time: when the user has no passkey yet
+
+A confirmation link handed to an agent can only ask a passkey that is
+already on file to sign. When the user has no passkey for your app yet, the
+refusal says so: `confirmation.enrollment_required` is `true`, and the 403
+body tells the agent that the link alone cannot be used and that the user
+should open the request from inside your app. `false` means a passkey is on
+file and the link works as before. The key is left out when the hosted
+service did not state it. On the typed copy it is
+`ActionConfirmation.EnrollmentRequired *bool` (nil when not stated; only a
+JSON boolean is kept, nothing is coerced).
+
+Your app then opens the request for its signed-in user with
+`Client.CreateOwnerLink`. The user creates a passkey and confirms on the
+page it opens; on a computer that page can show a QR code to continue on the
+user's phone.
+
+```go
+// Inside a route your signed-in user calls, not an agent-facing route.
+func openPendingConfirmation(w http.ResponseWriter, r *http.Request) {
+    user := currentUser(r) // your own session lookup
+    link, err := client.CreateOwnerLink(r.Context(), r.FormValue("action_session_id"), user.ID)
+    var apiErr *agentadmit.APIError
+    if errors.As(err, &apiErr) {
+        http.Error(w, apiErr.Code, apiErr.StatusCode) // 404, 409, 410, ...
+        return
+    }
+    if err != nil {
+        http.Error(w, "could not open the confirmation", http.StatusBadGateway)
+        return
+    }
+    http.Redirect(w, r, link.OwnerSessionURL, http.StatusSeeOther)
+}
+```
+
+Two rules:
+
+- Call it only from a route your signed-in human uses, and pass that user's
+  own id. The hosted service answers 404 when the request belongs to a
+  different user than the one you name.
+- Do not return `OwnerSessionURL` to an agent, and do not log it. Send it to
+  the signed-in user's browser only. The SDK does not log it either.
+
+The result is an `*agentadmit.OwnerLink` (`ActionSessionID`,
+`OwnerSessionURL`, `EnrollmentRequired`, `EnrollmentReason` of `no_passkey`
+or `no_eligible_authenticator` when enrollment is required, `ExpiresAt`).
+An id that is not an `asess_` id of at least 20 characters, or an empty
+user id or one longer than 255 characters, fails with
+`ErrInvalidOwnerLinkArgument` before any request is made. A 2xx body without
+a string `owner_session_url` and a boolean `enrollment_required` fails with
+`ErrMalformedOwnerLinkResponse`. Hosted errors (401 `invalid_api_key`, 403
+`api_key_not_app_linked`, 404 `not_found`, 409 `already_consumed` or
+`already_verified`, 410 `session_expired`, 429) come back as
+`*agentadmit.APIError` with `StatusCode` and `Code`, and are not retried.
+Calling it again for the same request is safe: a new link replaces the
+previous one. Every management call (`Revoke`, `ConfigureAlerts`,
+`CheckConsent`, ...) now returns `*agentadmit.APIError` for an HTTP error,
+with the same message text as before.
+
+When your app removes a user's passkeys through the API, AgentAdmit sends an
+`agentadmit.passkey_removed` webhook event (fields `removal_id`,
+`app_user_id`, `credential_ids`, `removed`, `remaining`, `wait_sec`,
+`removed_at`, `reenrollment_not_before`, `removed_by`); verify it with the
+same `VerifyWebhookSignature` helper as every other event.
+
 ## Context Support
 
 All SDK methods accept a `context.Context` for graceful cancellation and deadline propagation:

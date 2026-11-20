@@ -58,6 +58,17 @@ const (
 const confirmationRequiredDescription = "This action requires a fresh human confirmation. " +
 	"Give the confirmation link to the user, then retry with the X-AgentAdmit-Action-Attestation header."
 
+// confirmationEnrollmentRequiredDescription is the description written on a
+// confirmation_required refusal whose confirmation block states
+// enrollment_required: true (1.15.0). It replaces both the hosted
+// description and the fallback above, because the link alone cannot be used:
+// the user has no passkey on file for the app yet, and only the app can open
+// the confirmation for its signed-in user (Client.CreateOwnerLink).
+const confirmationEnrollmentRequiredDescription = "This action requires a fresh human confirmation, " +
+	"and this user has no passkey on file for the app yet, so the confirmation link alone cannot be used. " +
+	"Ask the user to open the request from inside the app. " +
+	"After they confirm, retry with the X-AgentAdmit-Action-Attestation header."
+
 // confirmationDeclinedDescription is the fixed fallback description written
 // when the hosted service does not supply its own on a confirmation_declined
 // refusal.
@@ -96,15 +107,23 @@ type ActionDecline struct {
 // Method, Endpoint, RequestDigest, and Summary are nullable on the wire and
 // are marshalled back out as JSON null when absent, so the 403 body an agent
 // receives has the same shape across every AgentAdmit SDK.
+//
+// EnrollmentRequired (1.15.0) is the hosted service's statement that this
+// user has no passkey on file for the app yet, so the link alone cannot be
+// used: the app has to open the confirmation for its signed-in user with
+// Client.CreateOwnerLink. It is nil when the hosted service did not state it
+// (or sent anything other than a JSON boolean) and is then left out of the
+// 403 body.
 type ActionConfirmation struct {
-	ActionSessionID  string  `json:"action_session_id"`
-	ActionSessionURL string  `json:"action_session_url"`
-	ExpiresAt        string  `json:"expires_at"`
-	Scope            string  `json:"scope"`
-	Method           *string `json:"method"`
-	Endpoint         *string `json:"endpoint"`
-	RequestDigest    *string `json:"request_digest"`
-	Summary          *string `json:"summary"`
+	ActionSessionID    string  `json:"action_session_id"`
+	ActionSessionURL   string  `json:"action_session_url"`
+	EnrollmentRequired *bool   `json:"enrollment_required,omitempty"`
+	ExpiresAt          string  `json:"expires_at"`
+	Scope              string  `json:"scope"`
+	Method             *string `json:"method"`
+	Endpoint           *string `json:"endpoint"`
+	RequestDigest      *string `json:"request_digest"`
+	Summary            *string `json:"summary"`
 }
 
 // ActionConfirmationConsumed reports that THIS call was accepted because the
@@ -307,14 +326,15 @@ func parseActionConfirmation(raw json.RawMessage) *ActionConfirmation {
 		return nil
 	}
 	return &ActionConfirmation{
-		ActionSessionID:  id,
-		ActionSessionURL: url,
-		ExpiresAt:        expires,
-		Scope:            scope,
-		Method:           nullableString(fields["method"]),
-		Endpoint:         nullableString(fields["endpoint"]),
-		RequestDigest:    nullableString(fields["request_digest"]),
-		Summary:          nullableString(fields["summary"]),
+		ActionSessionID:    id,
+		ActionSessionURL:   url,
+		EnrollmentRequired: strictBool(fields["enrollment_required"]),
+		ExpiresAt:          expires,
+		Scope:              scope,
+		Method:             nullableString(fields["method"]),
+		Endpoint:           nullableString(fields["endpoint"]),
+		RequestDigest:      nullableString(fields["request_digest"]),
+		Summary:            nullableString(fields["summary"]),
 	}
 }
 
@@ -386,6 +406,23 @@ func rawString(raw json.RawMessage) (string, bool) {
 	}
 	s, ok := value.(string)
 	return s, ok
+}
+
+// strictBool decodes a JSON boolean; anything else (absent, null, a string,
+// a number, an object, an array) is nil, never coerced.
+func strictBool(raw json.RawMessage) *bool {
+	if len(raw) == 0 {
+		return nil
+	}
+	var value interface{}
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil
+	}
+	b, ok := value.(bool)
+	if !ok {
+		return nil
+	}
+	return &b
 }
 
 // nullableString decodes a nullable JSON string; anything else is nil.

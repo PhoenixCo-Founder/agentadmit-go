@@ -606,6 +606,11 @@ func activeErrorDenial(info *TokenInfo, respBytes []byte, requiredScopes []strin
 			refusal.ErrorDescription = description
 		}
 		refusal.Confirmation = parseActionConfirmation(fields["confirmation"])
+		// 1.15.0: when the user has no passkey on file for the app, the link
+		// alone cannot be used; tell the agent to send the user into the app.
+		if refusal.Confirmation != nil && refusal.Confirmation.EnrollmentRequired != nil && *refusal.Confirmation.EnrollmentRequired {
+			refusal.ErrorDescription = confirmationEnrollmentRequiredDescription
+		}
 		if status, ok := rawString(fields["attestation_status"]); ok {
 			refusal.AttestationStatus = status
 		}

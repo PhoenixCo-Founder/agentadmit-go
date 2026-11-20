@@ -56,8 +56,7 @@ func (c *Client) callManagementAPI(ctx context.Context, method, path string, bod
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, resp.StatusCode, fmt.Errorf("agentadmit: management API returned %d: %s",
-			resp.StatusCode, string(respBytes))
+		return nil, resp.StatusCode, newAPIError(resp.StatusCode, respBytes)
 	}
 
 	return respBytes, resp.StatusCode, nil
