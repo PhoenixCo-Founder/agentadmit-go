@@ -321,6 +321,11 @@ func TestCreateOwnerLink_Malformed2xx(t *testing.T) {
 		`{"action_session_id":"x","owner_session_url":"https://agentadmit.com/o#t=secret","enrollment_required":"true"}`,
 		`not json https://agentadmit.com/o#t=secret`,
 		`[]`,
+		// Same rule as the other five SDKs: the result promises all four
+		// fields, so a body without the id or the expiry is malformed too.
+		`{"owner_session_url":"https://agentadmit.com/o#t=secret","enrollment_required":true,"expires_at":"e"}`,
+		`{"action_session_id":"x","owner_session_url":"https://agentadmit.com/o#t=secret","enrollment_required":true}`,
+		`{"action_session_id":7,"owner_session_url":"https://agentadmit.com/o#t=secret","enrollment_required":false,"expires_at":"e"}`,
 	}
 	for _, body := range bodies {
 		var calls []ownerLinkCall
@@ -333,5 +338,20 @@ func TestCreateOwnerLink_Malformed2xx(t *testing.T) {
 		if err != nil && (strings.Contains(err.Error(), "agentadmit.com/o") || strings.Contains(err.Error(), "secret")) {
 			t.Errorf("error message carries the URL: %v", err)
 		}
+	}
+}
+
+// The reason belongs to an enrollment: a stray enrollment_reason on a
+// "passkey already on file" answer is not copied through (same in all six SDKs).
+func TestCreateOwnerLink_ReasonOnlyWithEnrollment(t *testing.T) {
+	var calls []ownerLinkCall
+	body := `{"action_session_id":"` + ownerLinkSession + `","owner_session_url":"https://agentadmit.com/confirm/action/x","enrollment_required":false,"enrollment_reason":"no_passkey","expires_at":"2026-11-20T18:30:00.000Z"}`
+	client := newOwnerLinkClient(t, http.StatusOK, body, &calls)
+	link, err := client.CreateOwnerLink(context.Background(), ownerLinkSession, "user_42")
+	if err != nil || link == nil {
+		t.Fatalf("err = %v link = %+v", err, link)
+	}
+	if link.EnrollmentRequired || link.EnrollmentReason != nil {
+		t.Errorf("EnrollmentRequired = %v EnrollmentReason = %v, want false and nil", link.EnrollmentRequired, link.EnrollmentReason)
 	}
 }

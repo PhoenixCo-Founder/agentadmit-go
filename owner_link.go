@@ -34,8 +34,9 @@ const (
 var ErrInvalidOwnerLinkArgument = errors.New("agentadmit: invalid owner link argument")
 
 // ErrMalformedOwnerLinkResponse is returned when the hosted service answers
-// 2xx but the body has no string owner_session_url or no boolean
-// enrollment_required. No partial result is returned.
+// 2xx but the body lacks a string owner_session_url, action_session_id or
+// expires_at, or a boolean enrollment_required. No partial result is
+// returned.
 var ErrMalformedOwnerLinkResponse = errors.New("agentadmit: malformed owner link response")
 
 // OwnerLink is the result of CreateOwnerLink.
@@ -105,16 +106,19 @@ func parseOwnerLink(respBytes []byte) (*OwnerLink, error) {
 	}
 	ownerURL, okURL := rawString(fields["owner_session_url"])
 	enrollment := strictBool(fields["enrollment_required"])
-	if !okURL || enrollment == nil {
+	sessionID, okID := rawString(fields["action_session_id"])
+	expiresAt, okExpires := rawString(fields["expires_at"])
+	if !okURL || enrollment == nil || !okID || !okExpires {
 		return nil, ErrMalformedOwnerLinkResponse
 	}
 	link := &OwnerLink{
+		ActionSessionID:    sessionID,
 		OwnerSessionURL:    ownerURL,
 		EnrollmentRequired: *enrollment,
+		ExpiresAt:          expiresAt,
 	}
-	link.ActionSessionID, _ = rawString(fields["action_session_id"])
-	link.ExpiresAt, _ = rawString(fields["expires_at"])
-	if reason, ok := rawString(fields["enrollment_reason"]); ok {
+	// The reason belongs to an enrollment; it is kept only then.
+	if reason, ok := rawString(fields["enrollment_reason"]); ok && *enrollment {
 		link.EnrollmentReason = &reason
 	}
 	return link, nil

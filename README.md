@@ -586,7 +586,8 @@ or `no_eligible_authenticator` when enrollment is required, `ExpiresAt`).
 An id that is not an `asess_` id of at least 20 characters, or an empty
 user id or one longer than 255 characters, fails with
 `ErrInvalidOwnerLinkArgument` before any request is made. A 2xx body without
-a string `owner_session_url` and a boolean `enrollment_required` fails with
+a string `owner_session_url`, `action_session_id` or `expires_at`, or without a
+boolean `enrollment_required`, fails with
 `ErrMalformedOwnerLinkResponse`. Hosted errors (401 `invalid_api_key`, 403
 `api_key_not_app_linked`, 404 `not_found`, 409 `already_consumed` or
 `already_verified`, 410 `session_expired`, 429) come back as
@@ -597,9 +598,10 @@ previous one. Every management call (`Revoke`, `ConfigureAlerts`,
 with the same message text as before.
 
 When your app removes a user's passkeys through the API, AgentAdmit sends an
-`agentadmit.passkey_removed` webhook event (fields `removal_id`,
-`app_user_id`, `credential_ids`, `removed`, `remaining`, `wait_sec`,
-`removed_at`, `reenrollment_not_before`, `removed_by`); verify it with the
+`agentadmit.passkey_removed` webhook event (it carries `removal_id` and,
+under `data`, `app_user_id`, `credential_ids`, `removed`, `remaining`,
+`wait_sec`, `removed_at`, `reenrollment_not_before` and `removed_by`); verify
+it with the
 same `VerifyWebhookSignature` helper as every other event.
 
 ## Context Support
