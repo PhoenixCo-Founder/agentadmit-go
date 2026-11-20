@@ -195,3 +195,51 @@ func IsRateLimit(err error) bool {
 	var rlErr *RateLimitError
 	return errors.As(err, &rlErr)
 }
+
+// APIError is returned by the management API calls (Revoke, ConfigureAlerts,
+// CheckConsent, CreateOwnerLink, ...) when the hosted service answers with an
+// HTTP status of 400 or above (1.15.0; earlier versions returned an untyped
+// error with the same message text). Use errors.As to read the status and
+// the hosted error code:
+//
+//	var apiErr *agentadmit.APIError
+//	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusGone {
+//	    // the action session expired
+//	}
+type APIError struct {
+	// StatusCode is the HTTP status the hosted service answered with.
+	StatusCode int
+
+	// Code is the hosted "error" field (for example "not_found" or
+	// "already_consumed"), or "" when the body carried none.
+	Code string
+
+	// Description is the hosted "error_description" or "message" field, or "".
+	Description string
+
+	body string
+}
+
+// Error implements the error interface. The text is the one earlier versions
+// returned for a management API error.
+func (e *APIError) Error() string {
+	return fmt.Sprintf("agentadmit: management API returned %d: %s", e.StatusCode, e.body)
+}
+
+// newAPIError builds an *APIError from an error response body, reading the
+// error code leniently (a body that is not JSON leaves Code empty).
+func newAPIError(status int, body []byte) *APIError {
+	apiErr := &APIError{StatusCode: status, body: string(body)}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(body, &fields) == nil {
+		if code, ok := rawString(fields["error"]); ok {
+			apiErr.Code = code
+		}
+		if description, ok := rawString(fields["error_description"]); ok {
+			apiErr.Description = description
+		} else if message, ok := rawString(fields["message"]); ok {
+			apiErr.Description = message
+		}
+	}
+	return apiErr
+}
